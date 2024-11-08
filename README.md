@@ -24,6 +24,13 @@ $ pip install torch==2.3.1+cpu        -f https://download.pytorch.org/whl/torch_
 $ pip install torchvision==0.18.1+cpu -f https://download.pytorch.org/whl/torch_stable.html
 ```
 
+- download dataset (Goodle Speach Datasets)
+```bash
+### Download Google Speach Datasets ###
+$ cd tools/speech-to-spikes/dataset
+$ make
+```
+
 ## File trees
 ```bash
 python               # Directory for Python scripts
