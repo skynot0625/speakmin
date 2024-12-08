@@ -259,6 +259,66 @@ void Core::save_recorded_spikes(const std::string& filename) {
 
 // Run the simulation
 bool Core::run() {
+    /*
+    std::cout << "\nValidating parameters..." << std::endl;
+    
+    // Weight matrices sizes
+    std::cout << "Weight matrices sizes:" << std::endl;
+    std::cout << "W_in: " << W_in.size() << "x" << (W_in.empty() ? 0 : W_in[0].size()) << std::endl;
+    std::cout << "W_res: " << W_res.size() << "x" << (W_res.empty() ? 0 : W_res[0].size()) << std::endl;
+    std::cout << "W_out: " << W_out.size() << "x" << (W_out.empty() ? 0 : W_out[0].size()) << std::endl;
+    
+    // Sample weight values
+    std::cout << "\nWeight sample values:" << std::endl;
+    std::cout << "W_in[0]: ";
+    for(int i = 0; i < std::min(5, static_cast<int>(W_in[0].size())); i++) {
+        std::cout << W_in[0][i] << " ";
+    }
+    std::cout << "..." << std::endl;
+    
+    std::cout << "W_res[0]: ";
+    for(int i = 0; i < std::min(5, static_cast<int>(W_res[0].size())); i++) {
+        std::cout << W_res[0][i] << " ";
+    }
+    std::cout << "..." << std::endl;
+    
+    std::cout << "W_out[0]: ";
+    for(int i = 0; i < std::min(5, static_cast<int>(W_out[0].size())); i++) {
+        std::cout << W_out[0][i] << " ";
+    }
+    std::cout << "..." << std::endl;
+
+    // Neuron tau values
+    std::cout << "\nTau values:" << std::endl;
+    std::cout << "Reservoir neurons (first 5):" << std::endl;
+    for(int i = 0; i < std::min(5, static_cast<int>(Neu_res.size())); i++) {
+        std::cout << "Neu_res[" << i << "] tau: " << Neu_res[i].get_tau() << std::endl;
+    }
+    std::cout << "Output neurons (first 5):" << std::endl;
+    for(int i = 0; i < std::min(5, static_cast<int>(Neu_out.size())); i++) {
+        std::cout << "Neu_out[" << i << "] tau: " << Neu_out[i].get_tau() << std::endl;
+    }
+    
+    // Rest of the validation
+    std::cout << "\nNeuron vectors sizes:" << std::endl;
+    std::cout << "Neu_res: " << Neu_res.size() << std::endl;
+    std::cout << "Neu_out: " << Neu_out.size() << std::endl;
+    std::cout << "Neu_acc: " << Neu_acc.size() << std::endl;
+    
+    std::cout << "\nCritical parameters:" << std::endl;
+    std::cout << "T_sim: " << T_sim << std::endl;
+    std::cout << "t_delay: " << t_delay << std::endl;
+    std::cout << "N_out_times: " << N_out_times << std::endl;
+    std::cout << "Learning rate: " << lr << std::endl;
+    std::cout << "enabling_train: " << enabling_train << std::endl;
+    std::cout << "class_label: " << class_label << std::endl;
+    
+    std::cout << "\nTraining parameters:" << std::endl;
+    std::cout << "PTE_slide: " << PTE_slide << std::endl;
+    std::cout << "PTE_times: " << PTE_times << std::endl;
+    std::cout << "PTE_range: " << PTE_range << std::endl;
+    std::cout << "ET_N: " << ET_N << std::endl;
+    */
     return run_loop();
 }
 
@@ -704,6 +764,17 @@ bool Core::run_loop() {
 
     uint8_t max_index = std::distance(Neu_acc.begin(), std::max_element(Neu_acc.begin(), Neu_acc.end()));
     bool is_correct = (max_index == class_now);
+
+    /*
+    // Neu_out 상태 출력 추가
+    std::cout << "\nNeu_out final states:" << std::endl;
+    std::cout << "Class label: " << class_now << std::endl;
+    std::cout << "Accumulated spikes per class:" << std::endl;
+    for(size_t i = 0; i < Neu_acc.size(); i++) {
+        std::cout << "Class " << i << ": " << static_cast<int>(Neu_acc[i]) << " spikes" << std::endl;
+    }
+    */
+
     return is_correct;
 }
 

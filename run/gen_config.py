@@ -102,7 +102,7 @@ else:
 
 # Define the core parameters dictionary
 core_parameters = {
-    "t_delay": 3,
+    "t_delay": 1,
     "V_init": 0.0,
     "tau_out": 10000.0,
     "V_bot": -1.0,
@@ -116,8 +116,8 @@ core_parameters = {
     "N_bias": num_neu_bias,
     "N_class": num_class,
     "N_out_times": num_out_times,
-    "PTE_slide": 0,
-    "PTE_times": 4,
+    "PTE_slide": 1,
+    "PTE_times": 100,
     "PTE_range": 1,
     "ET_N": 15,
 }
