@@ -8,6 +8,8 @@ if __name__ == '__main__':
     import os
     from gscd_ext import GSCD
     from gscd_ext import AudioCore
+    from tqdm import tqdm
+    import gc
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('output_file', nargs='*', help='output spike file name (.bin)')
@@ -58,45 +60,52 @@ if __name__ == '__main__':
     if args.echo:
         dataset.show_categories()
 
-    #
-    # Convert
-    #------------------------------
-    splitted_wav_files = dataset.random_split(args.category, split_number_list, rng = None, rng_seed = args.rng_seed,
-                                              wav_file_source = args.wav_file_source, use_all_in_source = args.use_all_in_source)
+    # 데이터 준비
+    splitted_wav_files = dataset.random_split(args.category, split_number_list, rng=None, rng_seed=args.rng_seed,
+                                            wav_file_source=args.wav_file_source, use_all_in_source=args.use_all_in_source)
 
-    spikes_list_of_dict = dataset.convert2spikes(splitted_wav_files, args.n_mels, args.vth,
-                                                 align = args.align, alpha = args.alpha, time_unit = args.time_unit,
-                                                 pad_zero = pad_zero, norm = args.norm, norm_target_dBFS = args.norm_target_dBFS,
-                                                 mel_norm = mel_norm, num_process = args.num_process,
-                                                 vcsv_file_list = args.vcsv_file_list,
-                                                 leak_enable = args.leak_enable, leak_tau = args.leak_tau,
-                                                 preemphasis = args.preemphasis, preemphasis_coef = args.preemphasis_coef)
-
-    #
-    # Dump to file
-    #------------------------------
-    splitted_spikes_list_of_dict = dataset.split_and_shuffle_for_dump(spikes_list_of_dict, shuffle=True, rand_seed = args.rng_seed)
-
-    for spikes_list_of_dict_for_dump, output_file in zip(splitted_spikes_list_of_dict, output_file_list):
-        dataset.dump_as_binary(spikes_list_of_dict_for_dump, output_file)
-
+    # split_index별로 순차 처리
+    split_indices = sorted(set(d['split_index'] for d in splitted_wav_files))
+    
+    for split_index in tqdm(split_indices, desc="Processing splits"):
+        # 현재 split에 해당하는 파일만 처리
+        current_split_files = [d for d in splitted_wav_files if d['split_index'] == split_index]
+        
+        # 현재 split의 스파이크 변환
+        current_results = dataset.convert2spikes(current_split_files, args.n_mels, args.vth,
+                                              align=args.align, alpha=args.alpha, time_unit=args.time_unit,
+                                              pad_zero=pad_zero, norm=args.norm, norm_target_dBFS=args.norm_target_dBFS,
+                                              mel_norm=mel_norm, num_process=args.num_process,
+                                              vcsv_file_list=args.vcsv_file_list,
+                                              leak_enable=args.leak_enable, leak_tau=args.leak_tau,
+                                              preemphasis=args.preemphasis, preemphasis_coef=args.preemphasis_coef)
+        
+        # 현재 split의 결과를 파일로 저장
+        output_file = output_file_list[split_index]
+        dataset.dump_as_binary(current_results, output_file)
+        
+        # pickle 파일도 저장
         pickle_file = os.path.splitext(output_file)[0] + '.pickle'
-        dataset.dump_as_pickle(spikes_list_of_dict_for_dump, pickle_file)
+        dataset.dump_as_pickle(current_results, pickle_file)
+        
+        # 메모리 정리
+        del current_results
+        del current_split_files
+        gc.collect()
 
-    #
-    # Plot mel-frequency bank
-    #------------------------------
-    fig, ax = plt.subplots(figsize = (8, 6))
+    # Plot mel-frequency bank (이전과 동일)
+    fig, ax = plt.subplots(figsize=(8, 6))
     if args.vcsv_file_list != None:
         for csv_file in args.vcsv_file_list:
             freq, melfb = AudioCore.load_vcsv(csv_file)
             ax.plot(freq, [abs(complex_val) for complex_val in melfb])
     else:
-        sr = 16000 # 62.5 us
+        sr = 16000
         n_fft = 16000
-        AudioCore.plot_librosa_melfreq_bfp(ax, n_mels = args.n_mels, sr = sr, n_fft = n_fft, norm = mel_norm)
+        AudioCore.plot_librosa_melfreq_bfp(ax, n_mels=args.n_mels, sr=sr, n_fft=n_fft, norm=mel_norm)
     ax.set_xlabel('Frequency [Hz]')
     fig.tight_layout()
     fig.savefig('mel_freq_bank.png')
     ax.set_xscale('log')
     fig.savefig('mel_freq_bank_log.png')
+    plt.close(fig)

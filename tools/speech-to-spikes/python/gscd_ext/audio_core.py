@@ -11,6 +11,7 @@ from scipy import interpolate
 import numpy as np
 from pydub.utils import (audioop, ratio_to_db, get_array_type)
 import array
+import gc
 
 class AudioCore(object):
     def __init__(self, file, format = 'wav', ch_index = 0):
@@ -74,26 +75,29 @@ class AudioCore(object):
     #
     # Main functions
     #-------------------------------
-    def speech2spikes(self, n_mels, vth, alpha = 1.0, time_unit = 1.0, norm = 'slaney', vcsv_file_list = None,
-                      leak_enable = False, leak_tau = 16000e-6):
+    def speech2spikes(self, n_mels, vth, alpha=1.0, time_unit=1.0, norm='slaney', vcsv_file_list=None, leak_enable=False, leak_tau=16000e-6):
         spikes = []
         for ch in range(n_mels):
-            sig_filtered = self.bpf_melfreq(n_mels, ch, norm = norm, vcsv_file_list = vcsv_file_list)
-            sig_time = self.time
-            potential_t, potential_v, time_spike = self.integrate_and_fire(sig_filtered, vth, alpha=alpha,
-                                                                           leak_enable=leak_enable, leak_tau=leak_tau)
+            sig_filtered = self.bpf_melfreq(n_mels, ch, norm=norm, vcsv_file_list=vcsv_file_list)
+            potential_t, potential_v, time_spike = self.integrate_and_fire(
+                sig_filtered, vth, alpha=alpha,
+                leak_enable=leak_enable, 
+                leak_tau=leak_tau
+            )
+            
             time_previous = None
             for time in time_spike:
                 time_per_unit = time / time_unit
                 if time_unit != 1.0:
                     time_per_unit = int(round(time_per_unit))
-                time = time_per_unit
-                if time != time_previous:
-                    spikes.append([time, ch])
-                    time_previous = time
-
-        spikes_sorted = sorted(spikes, key = lambda x: x[0])
-        return spikes_sorted
+                if time_per_unit != time_previous:
+                    spikes.append([time_per_unit, ch])
+                    time_previous = time_per_unit
+            
+            del sig_filtered, potential_t, potential_v, time_spike
+            gc.collect()
+        
+        return sorted(spikes, key=lambda x: x[0])
 
     #
     # Custom made

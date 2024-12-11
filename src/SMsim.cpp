@@ -245,8 +245,6 @@ double run_simulation(Core& core_template, const std::string& file_path, int epo
     std::cout << "Current learning rate is " << core_template.lr << std::endl;
 
     for (size_t i = 0; i < all_spike_times.size(); ++i) {
-        if ((type == "train" && data_count >= 10000) || (type == "test" && data_count >= 1000)) break;
-
         core_template.reset(); // Reset neurons and spike queues
         core_template.enabling_train = enabling_train;
         core_template.load_spike_train(all_spike_times[i], all_neuron_indices[i]);
@@ -387,7 +385,7 @@ int main(int argc, char *argv[]) {
         double train_result = run_simulation(core_template, train_file_path, epoch, "train", train_data_count);
         std::cout << "Epoch " << epoch << " training accuracy: " << train_result * 100 << "%" << " with " << train_data_count << " data points." << std::endl;
 
-        if (epoch % 5 == 0) {
+        if (epoch % 5 == 4) {
             std::cout << "Starting testing epoch " << epoch << "...\n";
 
             double test_result = run_simulation(core_template, test_file_path, epoch, "test", test_data_count);
