@@ -14,3 +14,8 @@ run/SHD_700/*
 run/SHD_350/*
 run/train/*
 run/test/*
+run/accuracy_log.csv
+run/init_parameters.json
+run/init_taus.json
+run/init_weights.json
+run/training_weights.json

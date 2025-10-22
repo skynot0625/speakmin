@@ -327,6 +327,8 @@ class AudioCore(object):
         potential_t = []
         potential_v = []
         potential = 0
+        t_last_spike = -float('inf')  # Track last spike time
+        
         for index, v in enumerate(vin):
             t = self.time[index]
 
@@ -340,7 +342,7 @@ class AudioCore(object):
                 continue
 
             #--- integrate ----------
-            if v * v_pre < 0: # crossing 0 V --> triangle x 2
+            if v * v_pre < 0:  # crossing 0 V --> triangle x 2
                 t_0 = t_pre + abs(v_pre / v) * (t - t_pre)
                 s = abs((t_0 - t_pre) * v_pre / 2) + abs((t - t_0) * v / 2)
             else:
@@ -352,23 +354,33 @@ class AudioCore(object):
             else:
                 potential += s * alpha
 
-            #--- Vth comparison -----
+            #--- Vth comparison with refractory period -----
             if vth <= potential:
                 while vth <= potential:
                     time_spike = t_pre + (t - t_pre) * (vth - potential_pre) / (potential - potential_pre)
-                    potential_t.append(time_spike)
-                    potential_v.append(vth)
-                    potential_next = potential - vth
-                    potential_pre = potential
-                    potential = 0
-                    potential_t.append(time_spike)
-                    potential_v.append(potential)
-                    potential_pre = potential
-                    potential = potential_next
-                    if potential < vth:
-                        potential_t.append(t)
+                    
+                    # Check refractory period
+                    if (time_spike - t_last_spike) >= 1000e-6:
+                        # Spike is allowed (not in refractory period)
+                        potential_t.append(time_spike)
+                        potential_v.append(vth)
+                        potential_next = potential - vth
+                        potential_pre = potential
+                        potential = 0
+                        potential_t.append(time_spike)
                         potential_v.append(potential)
-                    time_spike_list.append(time_spike)
+                        potential_pre = potential
+                        potential = potential_next
+                        if potential < vth:
+                            potential_t.append(t)
+                            potential_v.append(potential)
+                        time_spike_list.append(time_spike)
+                        t_last_spike = time_spike  # Update last spike time
+                    else:
+                        # Skip spike due to refractory period
+                        # Potential still resets but no spike is recorded
+                        potential = 0
+                        break
             else:
                 potential_t.append(t)
                 potential_v.append(potential)
