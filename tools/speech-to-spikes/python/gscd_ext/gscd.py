@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Python class for Google Speech Command Dataset (GSCD)
-
 import glob
 import os
 import numpy as np
@@ -122,132 +121,95 @@ class GSCD(object):
         print(f"Processing categories: {category_list}")
         print(f"Split numbers: {split_number_list}")
         
+        assert all(category in source_categories for category in category_list)
+        
         if rng is None:
             rng = np.random.RandomState(rng_seed)
+            
+        splitted_wav_files = []
         
-        # 모든 카테고리의 데이터를 먼저 수집
-        all_selected_files = []
-        
-        # 각 카테고리에서 데이터 수집
+        # Process each category
         for category in category_list:
             wav_files = [d for d in source_wav_files if d['category'] == category]
             print(f"Processing {category}: Found {len(wav_files)} files")
             
-            current_split = split_number_list[0] if not use_all_in_source else len(wav_files)
+            if use_all_in_source:
+                current_split = len(wav_files)
+            else:
+                current_split = split_number_list[0]  # Use first split number
+                
             assert current_split <= len(wav_files), \
                 f"Not enough files for {category}. Need: {current_split}, Have: {len(wav_files)}"
             
-            # 각 카테고리에서 필요한 만큼의 파일 선택
-            wav_files_shuffled = rng.permutation(wav_files).tolist()[:current_split]
+            # Shuffle files
+            wav_files_shuffled = rng.permutation(wav_files).tolist()
+            selected_files = wav_files_shuffled[:current_split]
             
-            # split_index와 data_index 추가
-            for data_index, dict_data in enumerate(wav_files_shuffled):
-                for split_index in range(len(split_number_list)):
-                    dict_data_copy = dict_data.copy()
-                    dict_data_copy['split_index'] = split_index
-                    dict_data_copy['data_index'] = data_index
-                    dict_data_copy['label'] = self.category2index(category)
-                    all_selected_files.append(dict_data_copy)
+            # Add metadata - split files into multiple parts
+            num_splits = len(split_number_list)
+            files_per_split = current_split // num_splits
+            
+            for split_index in range(num_splits):
+                start_idx = split_index * files_per_split
+                end_idx = start_idx + files_per_split
+                
+                for data_index, dict_data in enumerate(selected_files[start_idx:end_idx]):
+                    dict_data['split_index'] = split_index
+                    dict_data['data_index'] = data_index
+                    dict_data['label'] = self.category2index(category)
+                    splitted_wav_files.append(dict_data)
         
-        # 전체 데이터를 한 번에 셔플
-        all_selected_files = rng.permutation(all_selected_files).tolist()
-        
-        print(f"Total processed files: {len(all_selected_files)}")
-        return all_selected_files
+        print(f"Total processed files: {len(splitted_wav_files)}")
+        return splitted_wav_files
 
     def split_and_shuffle_for_dump(self, spikes_list_of_dict, shuffle=True, rand_seed=10):
-        # 각 split을 독립적으로 처리하도록 수정
+        """Split and shuffle spikes data for dumping"""
+        # Get all unique split indices
         split_indices = sorted(set(d['split_index'] for d in spikes_list_of_dict))
         print(f"Processing {len(split_indices)} splits")
         
-        # 한 번에 하나의 split만 처리
         result = []
         for split_index in split_indices:
+            # Get data for current split
             split_data = [d for d in spikes_list_of_dict if d['split_index'] == split_index]
+            
             if shuffle:
                 random.seed(rand_seed)
                 random.shuffle(split_data)
+                
             result.append(split_data)
             print(f"Split {split_index}: {len(split_data)} files")
             
-            # 메모리 정리
-            del split_data
-            gc.collect()
-        
         return result
 
-
     def convert2spikes(self, splitted_wav_files, n_mels, vth, **kwargs):
-        chunk_size = kwargs.pop('chunk_size', 6000)
-        num_workers = kwargs.get('num_process', 8)
+        """Convert audio files to spikes with memory efficient processing"""
+        chunk_size = kwargs.pop('chunk_size', 1000)
+        num_workers = kwargs.get('num_process', 4)
+        results = []
         
-        # 현재 split의 스파이크 변환
-        split_results = []
-        total_chunks = (len(splitted_wav_files) + chunk_size - 1) // chunk_size
-        
-        with tqdm(total=total_chunks, desc="Processing chunks") as pbar:
-            for i in range(0, len(splitted_wav_files), chunk_size):
-                chunk = splitted_wav_files[i:i + chunk_size]
+        # Group files by category to maintain balance
+        categories = set(d['category'] for d in splitted_wav_files)
+        for category in categories:
+            category_files = [d for d in splitted_wav_files if d['category'] == category]
+            category_results = []
+            
+            # Process each category in chunks
+            for i in range(0, len(category_files), chunk_size):
+                chunk = category_files[i:i + chunk_size]
                 self._put_items_in_queue(chunk, n_mels, vth, **kwargs)
                 self._start_multi_process(num_workers)
                 chunk_results = self._get_results_from_result_queue()
-                split_results.extend(chunk_results)
+                category_results.extend(chunk_results)
                 
-                del chunk, chunk_results
-                gc.collect()
-                pbar.update(1)
+                # Clean up
+                del chunk
+                del chunk_results
+            
+            results.extend(category_results)
+            del category_results
         
-        return split_results
-
-    @classmethod
-    def _worker_queue(cls, queue, result_queue):
-        while True:
-            try:
-                item = queue.get()
-                if item is None:
-                    break
-
-                sound = AudioCore(item['wav_file'])
-                if item.get('preemphasis'):
-                    sound.preemphasis(coef=item['preemphasis_coef'])
-                
-                if item.get('norm'):
-                    sound.normalize(target_dBFS=item['norm_target_dBFS'])
-                
-                if item.get('align'):
-                    sound.align_sound(
-                        index_align=8000,
-                        n_points=16000,
-                        pad_zero=item['pad_zero']
-                    )
-
-                spikes = sound.speech2spikes(
-                    item['n_mels'],
-                    item['vth'],
-                    alpha=item['alpha'],
-                    time_unit=item['time_unit'],
-                    norm=item['mel_norm'],
-                    vcsv_file_list=item['vcsv_file_list'],
-                    leak_enable=item['leak_enable'],
-                    leak_tau=item['leak_tau']
-                )
-                
-                result = {
-                    **item,
-                    'num_points': len(spikes),
-                    'spikes': spikes
-                }
-                result_queue.put(result)
-                
-                # 메모리 즉시 해제
-                del sound
-                del spikes
-                del result
-                gc.collect()
-                
-            except Exception as e:
-                print(f"Error processing file: {e}")
-                continue
+        return results
 
     def _put_items_in_queue(self, splitted_wav_files, n_mels, vth, **kwargs):
         for dict_data in splitted_wav_files:
@@ -258,16 +220,9 @@ class GSCD(object):
                 **dict_data
             }
             self.queue.put(params)
-        
-        # worker 프로세스 종료 신호
+            
         for _ in range(kwargs.get('num_process', 4)):
             self.queue.put(None)
-
-    def _get_results_from_result_queue(self):
-        results = []
-        while not self.result_queue.empty():
-            results.append(self.result_queue.get())
-        return results
 
     def _start_multi_process(self, num_process):
         processes = []
@@ -288,6 +243,52 @@ class GSCD(object):
         while not self.result_queue.empty():
             results.append(self.result_queue.get())
         return results
+
+    @classmethod
+    def _worker_queue(cls, queue, result_queue):
+        while True:
+            try:
+                item = queue.get()
+                if item is None:
+                    break
+
+                sound = AudioCore(item['wav_file'])
+                if item.get('preemphasis'):
+                    sound.preemphasis(coef=item['preemphasis_coef'])
+                if item.get('norm'):
+                    sound.normalize(target_dBFS=item['norm_target_dBFS'])
+                if item.get('align'):
+                    sound.align_sound(
+                        index_align=8000,
+                        n_points=16000,
+                        pad_zero=item['pad_zero']
+                    )
+
+                spikes = sound.speech2spikes(
+                    item['n_mels'],
+                    item['vth'],
+                    alpha=item['alpha'],
+                    time_unit=item['time_unit'],
+                    norm=item['mel_norm'],
+                    vcsv_file_list=item['vcsv_file_list'],
+                    leak_enable=item['leak_enable'],
+                    leak_tau=item['leak_tau']
+                )
+
+                result_queue.put({
+                    **item,
+                    'num_points': len(spikes),
+                    'spikes': spikes
+                })
+
+            finally:
+                # Clean up memory
+                if 'sound' in locals():
+                    del sound
+                if 'spikes' in locals():
+                    del spikes
+                if 'item' in locals():
+                    del item
 
     def dump_as_binary(self, spikes_list_of_dict, output_file):
         # dump as binary data
