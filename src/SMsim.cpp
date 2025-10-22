@@ -129,8 +129,8 @@ void load_spike_trains_parallel(const std::string& file_path, std::vector<std::v
         all_neuron_indices[i] = std::move(neuron_indices);
 
         // you could change this part for another classes
-        // all_labels[i] = label;
-        all_labels[i] = label-10;
+        all_labels[i] = label;
+        // all_labels[i] = label-10;
 
         local_file.close();
     }
@@ -237,24 +237,35 @@ double run_simulation(Core& core_template, const std::string& file_path, int epo
     auto start_time = std::chrono::high_resolution_clock::now();
     std::cout << "Current learning rate is " << core_template.lr << std::endl;
 
-    for (size_t i = 0; i < all_spike_times.size(); ++i) {
-        core_template.reset(); // Reset neurons and spike queues
-        core_template.enabling_train = enabling_train;
-        core_template.load_spike_train(all_spike_times[i], all_neuron_indices[i]);
-        core_template.class_label = all_labels[i];
-
-        bool is_correct = core_template.run();
-
-        if (is_correct) {
-            ++correct_count;
-        }
-        ++data_count;
-
-        print_progress_bar(data_count, (type == "train") ? 10000 : 1000, start_time);
-
-        if (data_count % 1000 == 0) {
-            double current_accuracy = static_cast<double>(correct_count) / data_count;
-            std::cout << "Current accuracy after " << data_count << " data points: " << current_accuracy * 100 << "%" << std::endl;
+    // 청크 단위로 처리
+    for (int chunk_start = 0; chunk_start < num_entries; chunk_start += chunk_size) {
+        std::vector<std::vector<uint32_t>> chunk_spike_times;
+        std::vector<std::vector<uint16_t>> chunk_neuron_indices;
+        std::vector<uint8_t> chunk_labels;
+        
+        int chunk_end = std::min(chunk_start + chunk_size, num_entries);
+        std::vector<std::streampos> chunk_offsets(offsets.begin() + chunk_start, 
+                                                offsets.begin() + chunk_end);
+        
+        load_spike_trains_parallel(file_path, chunk_spike_times, chunk_neuron_indices, 
+                                 chunk_labels, chunk_offsets);
+        
+        for (size_t i = 0; i < chunk_spike_times.size(); ++i) {
+            core_template.reset();
+            core_template.enabling_train = enabling_train;
+            core_template.load_spike_train(chunk_spike_times[i], chunk_neuron_indices[i]);
+            core_template.class_label = chunk_labels[i];
+            
+            bool is_correct = core_template.run();
+            if (is_correct) ++correct_count;
+            ++data_count;
+            
+            print_progress_bar(data_count, num_entries, start_time);
+            if (data_count % 1000 == 0) {
+                double current_accuracy = static_cast<double>(correct_count) / data_count;
+                std::cout << "\nCurrent accuracy after " << data_count 
+                         << " data points: " << current_accuracy * 100 << "%" << std::endl;
+            }
         }
         
         // 청크 메모리 해제
@@ -383,7 +394,7 @@ int main(int argc, char *argv[]) {
         double train_result = run_simulation(core_template, train_file_path, epoch, "train", train_data_count);
         std::cout << "Epoch " << epoch << " training accuracy: " << train_result * 100 << "%" << " with " << train_data_count << " data points." << std::endl;
 
-        if (epoch % 5 == 4) {
+        if (epoch % 5 == 0) {
             std::cout << "Starting testing epoch " << epoch << "...\n";
 
             double test_result = run_simulation(core_template, test_file_path, epoch, "test", test_data_count);

@@ -121,41 +121,38 @@ class GSCD(object):
         print(f"Processing categories: {category_list}")
         print(f"Split numbers: {split_number_list}")
         
-        assert all(category in source_categories for category in category_list)
-        
         if rng is None:
             rng = np.random.RandomState(rng_seed)
-            
-        splitted_wav_files = []
         
-        # Process each category
+        # 모든 카테고리의 데이터를 먼저 수집
+        all_selected_files = []
+        
+        # 각 카테고리에서 데이터 수집
         for category in category_list:
             wav_files = [d for d in source_wav_files if d['category'] == category]
             print(f"Processing {category}: Found {len(wav_files)} files")
             
-            if use_all_in_source:
-                current_split = len(wav_files)
-            else:
-                current_split = split_number_list[0]  # Use first split number
-                
+            current_split = split_number_list[0] if not use_all_in_source else len(wav_files)
             assert current_split <= len(wav_files), \
                 f"Not enough files for {category}. Need: {current_split}, Have: {len(wav_files)}"
             
-            # Shuffle files
-            wav_files_shuffled = rng.permutation(wav_files).tolist()
-            selected_files = wav_files_shuffled[:current_split]
+            # 각 카테고리에서 필요한 만큼의 파일 선택
+            wav_files_shuffled = rng.permutation(wav_files).tolist()[:current_split]
             
-            # 각 split에 모든 파일을 포함
-            for split_index in range(len(split_number_list)):
-                for data_index, dict_data in enumerate(selected_files):
-                    dict_data_copy = dict_data.copy()  # 원본 데이터 보존
+            # split_index와 data_index 추가
+            for data_index, dict_data in enumerate(wav_files_shuffled):
+                for split_index in range(len(split_number_list)):
+                    dict_data_copy = dict_data.copy()
                     dict_data_copy['split_index'] = split_index
                     dict_data_copy['data_index'] = data_index
                     dict_data_copy['label'] = self.category2index(category)
-                    splitted_wav_files.append(dict_data_copy)
+                    all_selected_files.append(dict_data_copy)
         
-        print(f"Total processed files: {len(splitted_wav_files)}")
-        return splitted_wav_files
+        # 전체 데이터를 한 번에 셔플
+        all_selected_files = rng.permutation(all_selected_files).tolist()
+        
+        print(f"Total processed files: {len(all_selected_files)}")
+        return all_selected_files
 
     def split_and_shuffle_for_dump(self, spikes_list_of_dict, shuffle=True, rand_seed=10):
         # 각 split을 독립적으로 처리하도록 수정
@@ -180,8 +177,8 @@ class GSCD(object):
 
 
     def convert2spikes(self, splitted_wav_files, n_mels, vth, **kwargs):
-        chunk_size = kwargs.pop('chunk_size', 3000)
-        num_workers = kwargs.get('num_process', 4)
+        chunk_size = kwargs.pop('chunk_size', 6000)
+        num_workers = kwargs.get('num_process', 8)
         
         # 현재 split의 스파이크 변환
         split_results = []

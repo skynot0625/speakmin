@@ -1,6 +1,9 @@
 {
     "files.associations": {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1adba3e (Signed-off-by: sungminlee <skynot0625@gmail.com>)
         "ostream": "cpp",
         "random": "cpp",
         "any": "cpp",
@@ -66,8 +69,11 @@
         "cinttypes": "cpp",
         "typeinfo": "cpp",
         "valarray": "cpp"
+<<<<<<< HEAD
 =======
         "ostream": "cpp"
 >>>>>>> 05416bb (Fix merge conflicts and update files)
+=======
+>>>>>>> 1adba3e (Signed-off-by: sungminlee <skynot0625@gmail.com>)
     }
 }
