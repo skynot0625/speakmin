@@ -12,23 +12,15 @@ rng = np.random.default_rng(seed=0)
 num_neu_in = 16
 num_neu_res = 470
 num_class = 10
-'''
-'''
-num_neu_in = 32
-num_neu_res = 470
-num_class = 10
-'''
-
-num_neu_in = 32
-num_neu_res = 470
-num_class = 10
-'''
-
 num_neu_in = 16
-num_neu_res = 430
-num_class = 20
+num_neu_res = 460
+num_class = 10
 '''
-num_out_times = 2
+num_neu_in = 32
+num_neu_res = 460
+num_class = 10
+
+num_out_times = 4
 # 2, 4, 10
 num_neu_out = num_class * num_out_times # 10
 # 20, 40, 100
@@ -93,10 +85,7 @@ while np.sum(~inside_bounds) > 0:
     inside_bounds = inside_bounds_new
 
 # tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 56]) * 2500
-# tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 56]) * 500 # alpha=5
-tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 56]) * 500 # alpha=5
-# tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 56]) * 2000 # alpha=1
-# tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8]) * 2000 # alpha=1
+tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 56]) * 500
 bins = np.linspace(0.0, 6.0, len(tau_values) + 1)
 tau_bins = np.digitize(tau_samples_resampled, bins)
 tau_bins = np.clip(tau_bins - 1, 0, len(tau_values) - 1)
@@ -125,16 +114,11 @@ else:
 core_parameters = {
     "t_delay": 1,
     "V_init": 0.0,
-    "tau_out": 100000.0,
-    "tau_out_1": 2000.0,
-    "tau_out_2": 16000.0,
-    "tau_out_3": 4000.0,
-    "tau_out_4": 16000.0,
-    "V_bot": -2.0,
+    "tau_out": 4000.0,
+    "V_bot": -1.0,
     "V_th": 1.0,
     "V_reset": 0.0,
-    "t_ref": 4,
-    "alpha": 0.1,
+    "t_ref": 1000,
     "SG_window": 0.5,
     "N_in": num_neu_in,
     "N_res": num_neu_res,
@@ -142,9 +126,9 @@ core_parameters = {
     "N_bias": num_neu_bias,
     "N_class": num_class,
     "N_out_times": num_out_times,
-    "PTE_slide": 1,
-    "PTE_times": 100,
-    "PTE_range": 1,
+    "PTE_slide": 4,
+    "PTE_times": 1000,
+    "PTE_range": 4,
     "ET_N": 15,
 }
 
@@ -154,13 +138,11 @@ system_parameters = {
     "epoch": 1000,                                               # Example epoch value
     "lr": 0.004,                                                # same as conductance steps. This is for 8bits ~ 1/250.
     # "test_file": "../tools/speech-to-spikes/gen_spike/test.bin",    # Replace with the actual test file path
-    # "test_file": "../tools/speech-to-spikes/gen_spike/w_16_5/test.bin",    # Replace with the actual test file path
-    "test_file": "../tools/speech-to-spikes/gen_spike/d_32_5/test.bin",    # Replace with the actual test file path
-    # "test_file": "../tools/speech-to-spikes/gen_spike/all_32_5/test.bin",
+    "test_file": "../tools/speech-to-spikes/gen_spike/16_5/test.bin",    # Replace with the actual test file path
+    # "test_file": "../tools/speech-to-spikes/gen_spike/32_5/test.bin",    # Replace with the actual test file path
     # "training_file": "../tools/speech-to-spikes/gen_spike/train",   # Replace with the actual training file path
-    # "training_file": "../tools/speech-to-spikes/gen_spike/w_16_5/train",   # Replace with the actual training file path
-    "training_file": "../tools/speech-to-spikes/gen_spike/d_32_5/train",   # Replace with the actual training file path
-    # "training_file": "../tools/speech-to-spikes/gen_spike/all_32_5/train",
+    "training_file": "../tools/speech-to-spikes/gen_spike/16_5/train",   # Replace with the actual training file path
+    # "training_file": "../tools/speech-to-spikes/gen_spike/32_5/train",   # Replace with the actual training file path
     "N_chunks": 10,                             # you can devide training dataset as 'chunk'
 }
 

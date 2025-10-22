@@ -2,6 +2,7 @@
     "system_parameter": {
         "T_sim": 1000000000,
 <<<<<<< HEAD
+<<<<<<< HEAD
         "epoch": 1000,
         "lr": 0.004,
         "test_file": "../tools/speech-to-spikes/gen_spike/d_32_5/test.bin",
@@ -12,11 +13,18 @@
         "test_file": "../tools/speech-to-spikes/gen_spike/test.bin",
         "training_file": "../tools/speech-to-spikes/gen_spike/train",
 >>>>>>> 05416bb (Fix merge conflicts and update files)
+=======
+        "epoch": 1000,
+        "lr": 0.004,
+        "test_file": "../tools/speech-to-spikes/gen_spike/16_5/test.bin",
+        "training_file": "../tools/speech-to-spikes/gen_spike/16_5/train",
+>>>>>>> b4ae662 (Signed-off-by: sungminlee <skynot0625@gmail.com>)
         "N_chunks": 10
     },
     "core_parameter": {
         "t_delay": 1,
         "V_init": 0.0,
+<<<<<<< HEAD
 <<<<<<< HEAD
         "tau_out": 100000.0,
         "tau_out_1": 2000.0,
@@ -41,20 +49,23 @@
         "ET_N": 16
 =======
         "tau_out": 10000.0,
+=======
+        "tau_out": 4000.0,
+>>>>>>> b4ae662 (Signed-off-by: sungminlee <skynot0625@gmail.com>)
         "V_bot": -1.0,
         "V_th": 1.0,
         "V_reset": 0.0,
-        "t_ref": 10,
+        "t_ref": 1000,
         "SG_window": 0.5,
         "N_in": 16,
-        "N_res": 496,
-        "N_out": 10,
+        "N_res": 460,
+        "N_out": 40,
         "N_bias": 10,
         "N_class": 10,
-        "N_out_times": 1,
-        "PTE_slide": 1,
-        "PTE_times": 4,
-        "PTE_range": 1,
+        "N_out_times": 4,
+        "PTE_slide": 4,
+        "PTE_times": 1000,
+        "PTE_range": 4,
         "ET_N": 15
 >>>>>>> 05416bb (Fix merge conflicts and update files)
     }

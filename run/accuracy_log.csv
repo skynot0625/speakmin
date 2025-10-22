@@ -1,7 +1,10 @@
 epoch, train_accuracy, test_accuracy 
 <<<<<<< HEAD
+<<<<<<< HEAD
 0,23.8667,25.2667
 =======
 0,16.3333,10.3
 5,30.3333,14
 >>>>>>> 05416bb (Fix merge conflicts and update files)
+=======
+>>>>>>> b4ae662 (Signed-off-by: sungminlee <skynot0625@gmail.com>)
