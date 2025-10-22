@@ -132,6 +132,10 @@ void load_spike_trains_parallel(const std::string& file_path, std::vector<std::v
         all_labels[i] = label;
         // all_labels[i] = label-10;
 
+        // 6 selected classs left 14 right 15 on 16 off 17 go 19 stop 18 
+        // all_labels[i] = label-14;
+
+
         local_file.close();
     }
 
@@ -225,7 +229,11 @@ void print_progress_bar(int current, int total, const std::chrono::time_point<st
 }
 
 // Run the simulation and return the accuracy
-double run_simulation(Core& core_template, const std::string& file_path, int epoch, const std::string& type, int& data_count) {
+double run_simulation(Core& core_template, 
+    const std::string& file_path, 
+    int epoch, 
+    const std::string& type, 
+    int& data_count) {
     int correct_count = 0;
     bool enabling_train = (type == "train");
     const int chunk_size = 1000;  // 청크 단위로 처리
@@ -242,6 +250,9 @@ double run_simulation(Core& core_template, const std::string& file_path, int epo
         std::vector<std::vector<uint32_t>> chunk_spike_times;
         std::vector<std::vector<uint16_t>> chunk_neuron_indices;
         std::vector<uint8_t> chunk_labels;
+
+        // std::vector<std::vector<uint32_t>> chunk_bias_spike_times;
+        // std::vector<std::vector<uint16_t>> chunk_bias_neuron_indices;
         
         int chunk_end = std::min(chunk_start + chunk_size, num_entries);
         std::vector<std::streampos> chunk_offsets(offsets.begin() + chunk_start, 
@@ -249,17 +260,37 @@ double run_simulation(Core& core_template, const std::string& file_path, int epo
         
         load_spike_trains_parallel(file_path, chunk_spike_times, chunk_neuron_indices, 
                                  chunk_labels, chunk_offsets);
-        
+
+        // bias spike train 로드
+        std::string bias_file_path = "/home/sungminlee/speakmin/tools/speech-to-spikes/gen_bias_spike/bias_spikes_1Hz.bin"; // 40Hz가 잘나옴
+        // std::cout<< "Loading bias spike train from: " << bias_file_path << std::endl;
+        int bias_entries;
+        std::vector<std::streampos> bias_offsets = calculate_offsets(bias_file_path, bias_entries);
+        std::vector<std::vector<uint32_t>> bias_spike_times;
+        std::vector<std::vector<uint16_t>> bias_neuron_indices;
+        std::vector<uint8_t> bias_labels;
+
+        // bias spike train 데이터 로드 - bias_offsets 사용
+        load_spike_trains_parallel(bias_file_path, bias_spike_times, bias_neuron_indices, bias_labels, bias_offsets);
+   
         for (size_t i = 0; i < chunk_spike_times.size(); ++i) {
             core_template.reset();
             core_template.enabling_train = enabling_train;
             core_template.load_spike_train(chunk_spike_times[i], chunk_neuron_indices[i]);
+            core_template.load_bias_spike_train(bias_spike_times[0], bias_neuron_indices[0]);
             core_template.class_label = chunk_labels[i];
             
             bool is_correct = core_template.run();
             if (is_correct) ++correct_count;
             ++data_count;
-            
+/*
+#if defined(TRAIN_PHASE)
+            core_template.PTE_reg += 1 ;
+            if (core_template.PTE_reg == (core_template.PTE_times / core_template.PTE_slide)) core_template.PTE_reg = 0;
+            // std::cout << core_template.PTE_times << " " << core_template.PTE_slide ;
+            // std::cout << "\n" << core_template.PTE_reg << " ";
+#endif          
+*/
             print_progress_bar(data_count, num_entries, start_time);
             if (data_count % 1000 == 0) {
                 double current_accuracy = static_cast<double>(correct_count) / data_count;
@@ -329,15 +360,16 @@ int main(int argc, char *argv[]) {
 
     int num_epochs = param_json["system_parameter"]["epoch"].get<int>();
     std::string base_train_file_path = param_json["system_parameter"]["training_file"].get<std::string>();
-    std::string test_file_path = param_json["system_parameter"]["test_file"].get<std::string>();
+    std::string base_test_file_path = param_json["system_parameter"]["test_file"].get<std::string>();
     int T_sim = param_json["system_parameter"]["T_sim"].get<int>();
     double lr = param_json["system_parameter"]["lr"].get<double>();
     int N_chunks = param_json["system_parameter"]["N_chunks"].get<int>();
+    int N_test_chunks = param_json["system_parameter"]["N_test_chunks"].get<int>();
 
     std::cout << "Loaded system parameters:" << std::endl;
     std::cout << "Epochs: " << num_epochs << std::endl;
     std::cout << "Training file path: " << base_train_file_path << std::endl;
-    std::cout << "Test file path: " << test_file_path << std::endl;
+    std::cout << "Test file path: " << base_test_file_path << std::endl;
     std::cout << "Simulation time (T_sim): " << T_sim << std::endl;
 
     std::cout << "version: " <<  __GIT_REV__ << std::endl;
@@ -382,7 +414,7 @@ int main(int argc, char *argv[]) {
         int chunk_index = epoch % N_chunks;
         std::cout << chunk_index << "...\n";
 #if defined(TRAIN_PHASE)
-        core_template.PTE_slide = (epoch / N_chunks) % core_template.PTE_times;
+        // core_template.PTE_reg = (epoch / N_chunks) % core_template.PTE_times;
 #endif
         std::stringstream ss;
         ss << base_train_file_path << chunk_index << ".bin";
@@ -396,14 +428,33 @@ int main(int argc, char *argv[]) {
 
         if (epoch % 5 == 0) {
             std::cout << "Starting testing epoch " << epoch << "...\n";
-
-            double test_result = run_simulation(core_template, test_file_path, epoch, "test", test_data_count);
-            std::cout << "Epoch " << epoch << " test accuracy: " << test_result * 100 << "%" << " with " << test_data_count << " data points." << std::endl;
+            
+            double total_test_accuracy = 0.0;
+            int total_test_data = 0;
+            
+            for (int test_index = 0; test_index < N_test_chunks; ++test_index) {
+                std::stringstream ss;
+                ss << base_test_file_path << test_index << ".bin";
+                std::string test_file_path = ss.str();
+                
+                int current_test_count;
+                double current_test_result = run_simulation(core_template, test_file_path, epoch, "test", current_test_count);
+                
+                total_test_accuracy += current_test_result * current_test_count;
+                total_test_data += current_test_count;
+            }
+            
+            // 가중 평균 계산
+            double final_test_accuracy = total_test_accuracy / total_test_data;
+            
+            std::cout << "Epoch " << epoch << " test accuracy: " << final_test_accuracy * 100 
+                    << "%" << " with " << total_test_data << " data points." << std::endl;
+                    
             auto epoch_end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> epoch_duration = epoch_end - epoch_start;
             std::cout << "Epoch " << epoch << " duration: " << format_duration(epoch_duration) << ".\n";
 
-            save_accuracy_to_file(accuracy_file, epoch, train_result * 100, test_result * 100);
+            save_accuracy_to_file(accuracy_file, epoch, train_result * 100, final_test_accuracy * 100);
         }
 
         core_template.save_weights("./training_weights.json");

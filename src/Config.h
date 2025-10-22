@@ -11,14 +11,16 @@ struct Config {
     std::vector<std::vector<double>> W_out;
     std::vector<std::vector<bool>> W_fb;
     std::vector<std::vector<double>> W_bias;
+    std::vector<std::vector<double>> W_bias_out;
     double T_sim;
     double t_delay;
     double V_init;
     double tau_out;
     double tau_out_1;
     double tau_out_2;
-    double tau_out_4;
     double tau_out_3;
+    double tau_out_4;
+    double tau_out_5;
     double V_th;
     double V_bot;
     double V_reset;
@@ -26,6 +28,7 @@ struct Config {
     double t_ref;
 #endif
     double alpha;
+    double alpha_out;
     double SG_window;
 
     int N_in;

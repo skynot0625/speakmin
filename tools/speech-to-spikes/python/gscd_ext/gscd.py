@@ -4,6 +4,7 @@
 # Python class for Google Speech Command Dataset (GSCD)
 import glob
 import os
+import traceback
 import numpy as np
 import matplotlib.pyplot as plt
 import struct
@@ -13,7 +14,8 @@ import multiprocessing
 from .audio_core import AudioCore
 import gc
 from tqdm import tqdm  # 프로그레스 바를 위한 라이브러리 추가
-
+import logging
+from multiprocessing import get_logger
 
 class GSCD(object):
     def __init__(self, dataset_path):
@@ -178,7 +180,8 @@ class GSCD(object):
 
     def convert2spikes(self, splitted_wav_files, n_mels, vth, **kwargs):
         chunk_size = kwargs.pop('chunk_size', 6000)
-        num_workers = kwargs.get('num_process', 8)
+        # chunk_size = kwargs.pop('chunk_size', 1000)
+        num_workers = kwargs.get('num_process', 4)
         
         # 현재 split의 스파이크 변환
         split_results = []
@@ -186,6 +189,7 @@ class GSCD(object):
         
         with tqdm(total=total_chunks, desc="Processing chunks") as pbar:
             for i in range(0, len(splitted_wav_files), chunk_size):
+                gc.collect()
                 chunk = splitted_wav_files[i:i + chunk_size]
                 self._put_items_in_queue(chunk, n_mels, vth, **kwargs)
                 self._start_multi_process(num_workers)
@@ -200,6 +204,9 @@ class GSCD(object):
 
     @classmethod
     def _worker_queue(cls, queue, result_queue):
+        # 멀티프로세싱 전용 로거 사용
+        logger = get_logger()
+        logger.setLevel(logging.ERROR)
         while True:
             try:
                 item = queue.get()
@@ -209,9 +216,19 @@ class GSCD(object):
                 sound = AudioCore(item['wav_file'])
                 if item.get('preemphasis'):
                     sound.preemphasis(coef=item['preemphasis_coef'])
+                    # sound.preemphasis(coef=item['preemphasis_coef'])
+                    # sound.preemphasis(0.68)
                 
                 if item.get('norm'):
                     sound.normalize(target_dBFS=item['norm_target_dBFS'])
+                    sound.preemphasis(coef=item['preemphasis_coef'])
+                    # sound.normalize(target_dBFS=item['norm_target_dBFS'])
+
+                # if item.get('preemphasis'):
+                #     sound.preemphasis(0.95)
+                
+                # if item.get('norm'):
+                #     sound.normalize(target_dBFS=item['norm_target_dBFS'])
                 
                 if item.get('align'):
                     sound.align_sound(
@@ -219,6 +236,8 @@ class GSCD(object):
                         n_points=16000,
                         pad_zero=item['pad_zero']
                     )
+                
+                sound._do_fft()
 
                 spikes = sound.speech2spikes(
                     item['n_mels'],
@@ -244,9 +263,9 @@ class GSCD(object):
                 del result
                 gc.collect()
                 
+            # 수정된 _worker_queue 예외 처리
             except Exception as e:
-                print(f"Error processing file: {e}")
-                continue
+                logger.error(f"Error: {traceback.format_exc()}")
 
     def _put_items_in_queue(self, splitted_wav_files, n_mels, vth, **kwargs):
         for dict_data in splitted_wav_files:
@@ -289,30 +308,47 @@ class GSCD(object):
         return results
 
     def dump_as_binary(self, spikes_list_of_dict, output_file):
-        # dump as binary data
-        # Header: BHIBB
-        # Contents: (IH) * (number of spikes)
-        with open(output_file, 'wb') as f:
-            for data in spikes_list_of_dict:
-                # struct.pack format
-                # B: unsigned char,  1 byte  (8 bit)
-                # H: unsigned short, 2 bytes (16 bit)
-                # I: unsigned int,   4 bytes (32 bits)
-                # endian
-                # <: little endian
-                # >: big endian
-                header = struct.pack(
-                    '>BHIIBB',
-                    data['label'],
-                    data['data_index'],
-                    data['uid'],
-                    data['num_points'],
-                    0, 0
-                )
-                f.write(header)
-                
-                for spike in data['spikes']:
-                    f.write(struct.pack('>IH', spike[0], spike[1]))
+        import os
+        # 기존 파일 강제 삭제
+        if os.path.exists(output_file):
+            os.remove(output_file)  # <-- 추가
+
+        temp_path = output_file + '.tmp'
+        try:
+            with open(temp_path, 'wb') as f:  # 'wb' 모드로 열기
+                total_bytes_written = 0
+                for data in spikes_list_of_dict:
+                    declared = data['num_points']
+                    actual = len(data['spikes'])
+                    if declared != actual:
+                        raise ValueError(f"Entry {data['uid']}: Declared {declared} spikes, actual {actual}")
+                    # 헤더 작성 (13 bytes)
+                    header = struct.pack(
+                        '>BHIIBB',
+                        data['label'],
+                        data['data_index'],
+                        data['uid'],
+                        data['num_points'],
+                        0, 0
+                    )
+                    f.write(header)
+                    
+                    # 스파이크 데이터 작성 (6 bytes per spike)
+                    for spike_time, neuron_index in data['spikes']:
+                        packed = struct.pack('>IH', spike_time, neuron_index & 0x1F)
+                        f.write(packed)
+                        
+                # 파일 크기 검증
+                expected = len(spikes_list_of_dict)*13 + sum(d['num_points'] for d in spikes_list_of_dict)*6
+                if f.tell() != expected:
+                    logging.error(f"파일 크기 불일치: 기대값={expected}, 실제={f.tell()}")
+            # 원자적 교체
+            import os
+            os.replace(temp_path, output_file)
+        except IOError as e:
+            logging.error(f"파일 쓰기 실패: {str(e)}")
+            raise  # 상위 호출자에게 예외 전파
+
 
     def dump_as_pickle(self, spikes_list_of_dict, pickle_file):
         with open(pickle_file, 'wb') as f:
@@ -391,8 +427,16 @@ class GSCD(object):
                 sound = AudioCore(dict_data['wav_file'])
                 if preemphasis:
                     sound.preemphasis(coef = preemphasis_coef)
+                    # sound.preemphasis(coef = preemphasis_coef)
+                    # sound.preemphasis(0.68)
                 if norm:
                     sound.normalize(target_dBFS = norm_target_dBFS)
+                    sound.preemphasis(coef = preemphasis_coef)
+                    # sound.normalize(target_dBFS = norm_target_dBFS)
+                # if preemphasis:
+                #     sound.preemphasis(coef = preemphasis_coef)
+                # if norm:
+                #     sound.normalize(target_dBFS = norm_target_dBFS)
                 sig_max = max(max(sound.sig), abs(min(sound.sig)))
                 if sig_max > max_value:
                     max_value = sig_max
@@ -439,8 +483,16 @@ class GSCD(object):
                 sound = AudioCore(dict_data['wav_file'])
                 if preemphasis:
                     sound.preemphasis(coef = preemphasis_coef)
+                    # sound.preemphasis(coef = preemphasis_coef)
+                    # sound.preemphasis(0.68)
                 if norm:
                     sound.normalize(target_dBFS = norm_target_dBFS)
+                    sound.preemphasis(coef = preemphasis_coef)
+                    # sound.normalize(target_dBFS = norm_target_dBFS)
+                # if preemphasis:
+                #     sound.preemphasis(coef = preemphasis_coef)
+                # if norm:
+                #     sound.normalize(target_dBFS = norm_target_dBFS)
                 if align:
                     sound.align_sound(index_align = 8000, n_points = 16000, pad_zero = pad_zero)
                 row, col = index // fig_col, index % fig_col

@@ -10,6 +10,9 @@
 #include "Spike.h"
 #include "Event_unit.h"
 #include "Config.h"
+
+#include "Adaptive.h"
+
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
@@ -24,6 +27,8 @@ public:
 
     bool run();
     void load_spike_train(const std::vector<uint32_t>& spike_times, const std::vector<uint16_t>& neuron_indices);
+    // Core.h에 추가
+    void load_bias_spike_train(const std::vector<uint32_t>& spike_times, const std::vector<uint16_t>& neuron_indices);
     void save_recorded_spikes(const std::string& filename);
     void save_weights(const std::string& filename) const;
     void load_weights(const std::string& filename);
@@ -36,16 +41,22 @@ public:
     size_t train_index;
 
     size_t ET_N;
-    size_t PTE_times = 4;
-    size_t PTE_slide = 0;
-    size_t PTE_range = 1;
+    size_t PTE_times;
+    size_t PTE_slide;
+    size_t PTE_range;
+    size_t PTE_reg;
     double lr;
 
 private:
-    std::vector<std::vector<double>> W_in, W_res, W_out, W_bias;
+    std::vector<std::vector<double>> W_in, W_res, W_out, W_bias, W_bias_out;
     std::vector<std::vector<bool>> W_fb;
     std::vector<Neuron> Neu_res, Neu_out, Neu_bias;
     std::vector<Neuron> Neu_out_1, Neu_out_2;
+    
+    std::vector<AdaptUnit> Neu_adapt;   // NEW
+    double tau_adapt_default = 10000.0; // μs 단위 예시
+    double b_step_default  = 0.1;       // V 단위 예시
+    
     std::vector<size_t> Neu_acc;
     std::priority_queue<Spike> external_S_queue;
     std::priority_queue<Spike> internal_S_queue;
@@ -60,6 +71,7 @@ private:
     uint32_t t_delay;
     size_t N_out_times;
     double alpha;
+    double alpha_out;
 
     std::vector<uint32_t> recorded_times;
     std::vector<uint16_t> recorded_neuron_indices;

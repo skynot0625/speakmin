@@ -4,8 +4,11 @@
 #define NEURON_H
 
 #include <cmath>
+#include <cstdint>
 #include <ostream>
 #include <iostream>
+
+#include "Adaptive.h"
 
 class Neuron {
 private:
@@ -18,6 +21,7 @@ private:
     uint32_t T_last;     // Time of the last update for leaky computation
     double SG_window;  // Window for computing surrogate gradient
     uint32_t T_SG;       // Time for surrogate gradient calculation
+    uint32_t T_SG_sub;   // Time for surrogate gradient calculation (sub-threshold)
     double alpha;
 
 #if defined(REFRACTORY)
@@ -28,10 +32,10 @@ private:
 public:
 #if defined(REFRACTORY)
     Neuron(double V_init, double tau, double V_th, double V_bot, double V_reset, uint32_t t_ref, double alpha, double SG_window)
-        : V_mem(V_init), tau(tau), V_th(V_th), V_bot(V_bot), V_reset(V_reset), T_now(0), T_last(0), SG_window(SG_window), alpha(alpha), T_SG(0), T_ref(0), t_ref(t_ref) {}
+        : V_mem(V_init), tau(tau), V_th(V_th), V_bot(V_bot), V_reset(V_reset), T_now(0), T_last(0), SG_window(SG_window), alpha(alpha), T_SG(0), T_SG_sub(0), T_ref(0), t_ref(t_ref) {}
 #else
     Neuron(double V_init, double tau, double V_th, double V_bot, double V_reset, double SG_window, double alpha)
-        : V_mem(V_init), tau(tau), V_th(V_th), V_bot(V_bot), V_reset(V_reset), T_now(0), T_last(0), SG_window(SG_window), alpha(alpha), T_SG(0) {}
+        : V_mem(V_init), tau(tau), V_th(V_th), V_bot(V_bot), V_reset(V_reset), T_now(0), T_last(0), SG_window(SG_window), alpha(alpha), T_SG(0), T_SG_sub(0) {}
 #endif
 
     // Getter methods
@@ -82,6 +86,7 @@ public:
     inline void reset_ref() {
 #if defined(REFRACTORY)
         T_SG = 0;
+        T_SG_sub = 0;
         T_ref = 0;
 #endif
     }
@@ -92,19 +97,38 @@ public:
 #if defined(REFRACTORY)
         // for negative/positive balanced update
         // not t_ref? tau?
-        if (SG) T_SG = T_now + t_ref;
+        if (SG) {
+            T_SG = T_now + t_ref;
+            T_SG_sub = T_now + 10;
+        }
 #endif
         return SG;
     }
 
     // Function to check if surrogate gradient reference time is active
+#if defined(REFRACTORY)
     inline bool is_SG_ref(uint32_t T_now) const {
+        // return T_SG >= (T_now + t_ref);
+        // return T_SG >= (T_now + t_ref);
+        // return (T_SG_sub < T_now) && (T_now < T_SG);
+        return T_now < T_SG;
+    }
+#endif
 
-        return T_now < T_SG; }
+    // Function to check if surrogate gradient reference time is active
+    inline void SG_ref_off(uint32_t T_now) {
+        T_SG = T_now; }
 
 #if defined(REFRACTORY)
     inline bool is_ref(uint32_t T_now) const { return T_now < T_ref; }
 #endif
+
+    /* ---------- Adaptive current coupling ---------- */
+    // adapt_unit 의 I를 막전위에서 감산 ( = 음의 입력 )
+    inline void adapt(const AdaptUnit& AU) {
+        V_mem -= AU.get_I();
+        if (V_mem < V_bot) V_mem = V_bot;
+    }
 };
 
 #endif // NEURON_H

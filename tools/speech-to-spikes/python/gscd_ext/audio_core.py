@@ -5,6 +5,7 @@
 #
 import matplotlib.pyplot as plt
 import librosa
+from librosa import stft 
 import math
 from pydub import AudioSegment
 from scipy import interpolate
@@ -45,8 +46,25 @@ class AudioCore(object):
         self.time = np.linspace(self.time_s, self.time_e, self.n_points, endpoint = False)
 
     def _do_fft(self):
-        self.dft_x = np.fft.fft(self.sig)
-        self.dft_f = np.fft.fftfreq(self.n_points, self.dt)
+        # window = np.hanning(self.n_points)
+        # self.dft_x = np.fft.fft(self.sig * window)
+        # self.dft_f = np.fft.fftfreq(self.n_points, self.dt)
+        # STFT 계산
+        D = librosa.stft(
+            self.sig,
+            n_fft=512,
+            hop_length=128,
+            window='hann'  # 기본값이지만 명시적 지정 권장
+        )
+        
+        # 결과 저장
+        self.dft_x = D  # 복소수 스펙트로그램
+        self.dft_f = librosa.fft_frequencies(sr=1/self.dt, n_fft=512)
+        self.dft_t = librosa.frames_to_time(
+            np.arange(D.shape[1]), 
+            sr=1/self.dt, 
+            hop_length=128
+        )
 
     def dump_as_pwl(self, ofile, scale = 0.0894e-3, shift = 1.0, echo = True):
         string_list = []
@@ -75,29 +93,32 @@ class AudioCore(object):
     #
     # Main functions
     #-------------------------------
-    def speech2spikes(self, n_mels, vth, alpha=1.0, time_unit=1.0, norm='slaney', vcsv_file_list=None, leak_enable=False, leak_tau=16000e-6):
+    def speech2spikes(self, n_mels, vth, alpha=1.0, time_unit=1.0, norm='slaney', vcsv_file_list=None,
+                    leak_enable=False, leak_tau=16000e-6, ref=1000e-6):   # <-- 여기 ref 추가됨
         spikes = []
         for ch in range(n_mels):
             sig_filtered = self.bpf_melfreq(n_mels, ch, norm=norm, vcsv_file_list=vcsv_file_list)
+            sig_time = self.time
             potential_t, potential_v, time_spike = self.integrate_and_fire(
                 sig_filtered, vth, alpha=alpha,
-                leak_enable=leak_enable, 
-                leak_tau=leak_tau
+                leak_enable=leak_enable, leak_tau=leak_tau,
+                ref=ref  # ✅ 여기 전달!
             )
-            
             time_previous = None
             for time in time_spike:
                 time_per_unit = time / time_unit
                 if time_unit != 1.0:
                     time_per_unit = int(round(time_per_unit))
-                if time_per_unit != time_previous:
-                    spikes.append([time_per_unit, ch])
-                    time_previous = time_per_unit
-            
-            del sig_filtered, potential_t, potential_v, time_spike
-            gc.collect()
-        
-        return sorted(spikes, key=lambda x: x[0])
+                time = time_per_unit
+                if time != time_previous:
+                    spikes.append([time, ch])
+                    time_previous = time
+
+        spikes_sorted = sorted(spikes, key=lambda x: x[0])
+
+        del sig_filtered, potential_t, potential_v, time_spike
+        gc.collect()
+        return spikes_sorted
 
     #
     # Custom made
@@ -112,7 +133,7 @@ class AudioCore(object):
             mel = m0 * math.log10(hz / f0 + 1)
         elif style == 'slaney': # refer to https://en.wikipedia.org/wiki/Mel_scale
             if hz < 1000:
-                mel = 3 * f / 200
+                mel = 3 * hz / 200
             else:
                 mel = 15 + 27 * math.log(hz / 1000, 6.4)
         else: # not used, but leave this as it is
@@ -182,7 +203,7 @@ class AudioCore(object):
             self.duration = self.duration + abs(point_diff) * (self.time[1] - self.time[0])
         else:
             data = self.sig
-
+        
         w_average_index = np.sum( np.abs(data) * np.arange(n_points) ) / np.sum( np.abs(data) + 1e-6) # weighted average (index)
         delta_index = index_align - int(w_average_index)
         if delta_index > 0:
@@ -199,17 +220,21 @@ class AudioCore(object):
 
         self.sig = converted_data
         self._create_time()
-        self._do_fft()
+        # self._do_fft()
 
     def normalize(self, target_dBFS = -31.782): # -24 - 7.782
         # 24 dBu = 0 dBFS (assumption)
         # -10 dBV = -7.782 dBu (line input)
         # -24 dBu - 7.782 dBu --> -31.782 dBFS
+        # new!
+        if self.dBFS < -80:  # 너무 작은 RMS는 증폭 제한
+            print("Warning: Signal too quiet for reliable normalization")
+            return
         current_dBFS = self.dBFS
         change_in_dBFS = target_dBFS - current_dBFS
 
         self.sig = 10 ** (change_in_dBFS / 20) * self.sig
-        self._do_fft()
+        # self._do_fft()
 
     def get_dBFS(self):
         sample_width = 2 # bytes
@@ -224,10 +249,16 @@ class AudioCore(object):
     #-------------------------------
     def preemphasis(self, coef=0.97):
         # Apply pre-emphasis filter to reduce noise
-        self.sig = librosa.effects.preemphasis(self.sig, coef=coef)
-        self.dBFS = self.get_dBFS()
-        self._do_fft()
+        # new!
+        if max(self.sig) < 1000:  # 작은 신호에 대해 계수 감소
+            coef = min(coef, 0.68)
+        self.sig = librosa.effects.preemphasis(self.sig, coef=0.68)
 
+        # self.sig = librosa.effects.preemphasis(self.sig, coef=coef)
+        self.dBFS = self.get_dBFS()
+        # self._do_fft()
+
+    '''
     def bpf_melfreq(self, n_mels, index, norm = 'slaney', echo = False, vcsv_file_list = None):
         assert norm in ['slaney', None]
 
@@ -273,6 +304,107 @@ class AudioCore(object):
 
         #print(f'index={index}, argmax(melfb)={np.argmax(melfb)}, freq={melfb_freq[np.argmax(melfb)]}')
         return sig_filtered
+    '''
+    def bpf_melfreq(self, n_mels, index, norm='slaney', echo=False, vcsv_file_list=None):
+        """
+        Power spectrum 기반 Mel 필터링으로 시간 영역 신호 복원
+        """
+        assert norm in ['slaney', None]
+        
+        # Mel 필터 뱅크 생성
+        if vcsv_file_list != None:
+            melfb_freq = librosa.fft_frequencies(sr=self.frame_rate, n_fft=512)
+            melfb = self.gen_melfb_from_vcsv(vcsv_file_list[index], melfb_freq)
+        else:
+            melfb_2d = librosa.filters.mel(
+                sr=self.frame_rate, 
+                n_fft=512,
+                n_mels=n_mels, 
+                norm=norm
+            )
+            melfb = melfb_2d[index]
+        
+        '''
+        # 1. 노이즈 스펙트럼 추정
+        magnitude = np.abs(self.dft_x)
+        noise_spectrum = librosa.decompose.nn_filter(
+            magnitude, 
+            aggregate=np.median, 
+            metric='cosine'
+        )
+        
+        # 2. Wiener 게인 계산
+        epsilon = 1e-10
+        wiener_gain = (magnitude**2) / (magnitude**2 + noise_spectrum**2 + epsilon)
+        
+        # 3. 필터링된 STFT 생성
+        D_denoised = self.dft_x * wiener_gain
+        
+        # 즉시 메모리 해제
+        del magnitude, noise_spectrum
+        gc.collect()
+
+        # 방법 2
+        magnitude = np.abs(self.dft_x)
+    
+        # 간단한 노이즈 추정 (중간값 사용)
+        noise_floor = np.percentile(magnitude, 10, axis=1, keepdims=True)
+        
+        # 차감 비율 계산 (추가 배열 생성 최소화)
+        gain_mask = np.maximum(0.1, 1 - noise_floor / (magnitude + 1e-10))
+        
+        # 위상 보존하면서 필터링
+        D_filtered = self.dft_x * gain_mask
+        '''
+        # ==== 메모리 효율적인 노이즈 제거 ====
+        magnitude = np.abs(self.dft_x)
+        
+        # 간단한 노이즈 추정 (10% percentile 사용)
+        # noise_floor = np.percentile(magnitude, 30, axis=1, keepdims=True)
+        noise_floor = np.percentile(magnitude, 10, axis=1, keepdims=True)
+        
+        # 차감 비율 계산 (추가 배열 생성 최소화)
+        # gain_mask = np.maximum(0.01, 1 - noise_floor / (magnitude + 1e-10))
+        gain_mask = np.maximum(0.1, 1 - noise_floor / (magnitude + 1e-10))
+        
+        # 노이즈 제거된 STFT 생성
+        D_denoised = self.dft_x * gain_mask
+        # =====================================
+
+        # Mel 필터를 2D로 확장 (시간 축 추가)
+        mel_filter_2d = melfb[:, np.newaxis]
+        
+        # 노이즈 제거된 신호에 Mel 필터 적용
+        D_filtered = D_denoised * mel_filter_2d
+        '''
+        # Mel 필터를 2D로 확장
+        mel_filter_2d = melfb[:, np.newaxis]
+        
+        # ===== 새로운 Power spectrum 기반 필터링 =====
+        # Power spectrum 계산
+        D_magnitude = np.abs(self.dft_x)
+        D_phase = np.angle(self.dft_x)
+        filtered_magnitude = mel_filter_2d * D_magnitude
+        D_filtered = filtered_magnitude * np.exp(1j * D_phase)
+        # =============================================
+        
+        # 기존방법
+        # Mel 필터를 2D로 확장 (시간 축 추가)
+        mel_filter_2d = melfb[:, np.newaxis]
+        
+        # STFT 결과에 필터 적용
+        D_filtered = self.dft_x * mel_filter_2d
+        '''
+        
+        # 역 STFT로 시간 영역 신호 복원
+        sig_filtered = librosa.istft(
+            D_filtered,
+            hop_length=128,
+            window='hann',
+            n_fft=512
+        )
+        
+        return sig_filtered
 
     @classmethod
     def plot_librosa_melfreq_bfp(cls, ax, n_mels, sr = 16000, n_fft = 16000, norm = 'slaney'):
@@ -317,22 +449,24 @@ class AudioCore(object):
     #
     # Intentration & Fire (IAF)
     #------------------------------
-    def integrate_and_fire(self, vin, vth, alpha=1, leak_enable=False, leak_tau=16000e-6):
-        '''
-        vin: BP-filtered data input (generated by self.bpf_melfreq())
-        vth: threshold for creating spikes
-        alpha: coeeficient for integrating potential
-        '''
+    def integrate_and_fire(self, vin, vth, alpha=1, leak_enable=False, leak_tau=16000e-6, ref=1000e-6):
+        """
+        vin: 입력 전압 (band-pass filtered signal)
+        vth: spike 발생 임계값
+        alpha: integration scale
+        ref: (초) 단위의 불응기 시간. 예: 1000us = 1000e-6
+        """
         time_spike_list = []
         potential_t = []
         potential_v = []
         potential = 0
-        t_last_spike = -float('inf')  # Track last spike time
-        
+        in_ref = False
+        ref_end_time = -np.inf
+
         for index, v in enumerate(vin):
             t = self.time[index]
 
-            #--- skip first data ----
+            # 초기화 단계
             if index == 0:
                 potential_t.append(t)
                 potential_v.append(potential)
@@ -341,8 +475,18 @@ class AudioCore(object):
                 v_pre = v
                 continue
 
-            #--- integrate ----------
-            if v * v_pre < 0:  # crossing 0 V --> triangle x 2
+            # ---------- Refractory period 처리 ----------
+            if t < ref_end_time:
+                potential = 0    # clamp (혹은 reset value 설정 가능)
+                potential_t.append(t)
+                potential_v.append(potential)
+                t_pre = t
+                v_pre = v
+                continue  # 적분 및 spike 생성 skip
+            # --------------------------------------------
+
+            # integrate
+            if v * v_pre < 0:  # zero crossing -> triangle area
                 t_0 = t_pre + abs(v_pre / v) * (t - t_pre)
                 s = abs((t_0 - t_pre) * v_pre / 2) + abs((t - t_0) * v / 2)
             else:
@@ -354,33 +498,35 @@ class AudioCore(object):
             else:
                 potential += s * alpha
 
-            #--- Vth comparison with refractory period -----
+            # threshold check
             if vth <= potential:
                 while vth <= potential:
                     time_spike = t_pre + (t - t_pre) * (vth - potential_pre) / (potential - potential_pre)
-                    
-                    # Check refractory period
-                    if (time_spike - t_last_spike) >= 1000e-6:
-                        # Spike is allowed (not in refractory period)
-                        potential_t.append(time_spike)
-                        potential_v.append(vth)
-                        potential_next = potential - vth
-                        potential_pre = potential
-                        potential = 0
-                        potential_t.append(time_spike)
+
+                    # spike 기록
+                    time_spike_list.append(time_spike)
+
+                    # potential reset & 고정
+                    potential_t.append(time_spike)
+                    potential_v.append(vth)
+
+                    potential_pre = potential
+                    potential = 0  # reset after spike
+                    potential_t.append(time_spike)
+                    potential_v.append(potential)
+
+                    # ref 설정
+                    ref_end_time = time_spike + ref  # ref 기간 동안 clamp 유지
+
+                    # 다음 potential 이어지는 경우 갱신
+                    potential_next = potential_pre - vth
+                    potential_pre = potential
+                    potential = potential_next
+
+                    # ref로 인해 break할 가능성 있음
+                    if potential < vth:
+                        potential_t.append(t)
                         potential_v.append(potential)
-                        potential_pre = potential
-                        potential = potential_next
-                        if potential < vth:
-                            potential_t.append(t)
-                            potential_v.append(potential)
-                        time_spike_list.append(time_spike)
-                        t_last_spike = time_spike  # Update last spike time
-                    else:
-                        # Skip spike due to refractory period
-                        # Potential still resets but no spike is recorded
-                        potential = 0
-                        break
             else:
                 potential_t.append(t)
                 potential_v.append(potential)
@@ -389,6 +535,7 @@ class AudioCore(object):
             t_pre = t
 
         return potential_t, potential_v, time_spike_list
+
 
     #
     # Plot utilities

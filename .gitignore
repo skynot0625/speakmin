@@ -19,3 +19,5 @@ run/init_parameters.json
 run/init_taus.json
 run/init_weights.json
 run/training_weights.json
+*run/train_bin_grouped/
+*run/test_bin_grouped/

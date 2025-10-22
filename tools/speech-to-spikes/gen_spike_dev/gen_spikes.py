@@ -6,6 +6,9 @@ if __name__ == '__main__':
     import pickle
     import numpy as np
     from gscd_ext import AudioCore
+    import multiprocessing.util
+    import logging
+    multiprocessing.util.log_to_stderr(logging.ERROR)  # stderr로 로그 리다이렉트
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('audio_file', help='audio file name')
@@ -18,7 +21,13 @@ if __name__ == '__main__':
     parser.add_argument('--time_unit', help='time unit', type=float, default=1)
     args = parser.parse_args()
 
-    sound = AudioCore(args.audio_file)
+    import sys
+    try:
+        sound = AudioCore(args.audio_file)
+    except FileNotFoundError:
+        print(f"Error: File {args.audio_file} not found", file=sys.stderr)
+        sys.exit(1)
+
     if args.align:
         sound.align_sound(index_align = 8000, n_points = 16000, pad_zero = False)
     spikes_sorted = sound.speech2spikes(args.n_mels, args.vth, alpha = args.alpha, time_unit = args.time_unit)

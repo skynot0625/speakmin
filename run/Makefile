@@ -23,5 +23,6 @@ ${SMSIM} :
 clean :
 	-rm ${JSON_FILES}
 	-rm ${LOG_FILE}
+	make -C ../src clean
 
 .PHONY: run

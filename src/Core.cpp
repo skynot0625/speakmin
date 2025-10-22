@@ -10,6 +10,8 @@
 #include <omp.h>
 #include <vector>
 #include <thread>
+#include <random>
+#include <algorithm>
 
 using json = nlohmann::json;
 
@@ -34,8 +36,9 @@ Core::Core(const std::string& param_file, const std::string& weights_file, const
     config.tau_out = param_json["core_parameter"]["tau_out"].get<double>();
     config.tau_out_1 = param_json["core_parameter"]["tau_out_1"].get<double>();
     config.tau_out_2 = param_json["core_parameter"]["tau_out_2"].get<double>();
-    config.tau_out_3 = param_json["core_parameter"]["tau_out_1"].get<double>();
-    config.tau_out_4 = param_json["core_parameter"]["tau_out_2"].get<double>();
+    config.tau_out_3 = param_json["core_parameter"]["tau_out_3"].get<double>();
+    config.tau_out_4 = param_json["core_parameter"]["tau_out_4"].get<double>();
+    config.tau_out_5 = param_json["core_parameter"]["tau_out_5"].get<double>();
     config.V_th = param_json["core_parameter"]["V_th"].get<double>();
     config.V_bot = param_json["core_parameter"]["V_bot"].get<double>();
     config.V_reset = param_json["core_parameter"]["V_reset"].get<double>();
@@ -44,6 +47,7 @@ Core::Core(const std::string& param_file, const std::string& weights_file, const
     config.t_ref = param_json["core_parameter"]["t_ref"].get<uint32_t>();
 #endif
     config.alpha = param_json["core_parameter"]["alpha"].get<double>();
+    config.alpha_out = param_json["core_parameter"]["alpha_out"].get<double>();
     config.N_in = param_json["core_parameter"]["N_in"].get<int>();
     config.N_res = param_json["core_parameter"]["N_res"].get<int>();
     config.N_out = param_json["core_parameter"]["N_out"].get<int>();
@@ -96,16 +100,21 @@ Core::Core(const std::string& param_file, const std::string& weights_file, const
     config.W_out = weights_json["W_out"].get<std::vector<std::vector<double>>>();
     config.W_fb = weights_json["W_fb"].get<std::vector<std::vector<bool>>>();
     config.W_bias = weights_json["W_bias"].get<std::vector<std::vector<double>>>();
+    config.W_bias_out = weights_json["W_bias_out"].get<std::vector<std::vector<double>>>();
 
     std::cout << "weights file is okay" << std::endl;
 
     *this = Core(config, tau_values);
 }
 
-
 // Core constructor with configuration and tau values
 Core::Core(const Config& config, const std::vector<int>& tau_values)
-    : W_in(config.W_in), W_res(config.W_res), W_out(config.W_out), W_fb(config.W_fb), W_bias(config.W_bias), T_sim(config.T_sim), t_delay(config.t_delay), alpha(config.alpha) {
+    : W_in(config.W_in), W_res(config.W_res), W_out(config.W_out), W_fb(config.W_fb), W_bias(config.W_bias), W_bias_out(config.W_bias_out), T_sim(config.T_sim), t_delay(config.t_delay), alpha(config.alpha), alpha_out(config.alpha_out), N_out_times(config.N_out_times), 
+      PTE_slide(config.PTE_slide),
+      PTE_times(config.PTE_times), 
+      PTE_range(config.PTE_range),
+      PTE_reg(0),
+      ET_N(config.ET_N) {
 
 #if defined(REFRACTORY)
     Neu_res.reserve(config.N_res);
@@ -115,11 +124,14 @@ Core::Core(const Config& config, const std::vector<int>& tau_values)
 
     Neu_out.reserve(config.N_out);
     for (int i = 0; i < config.N_class; ++i) {
-        Neu_out.emplace_back(config.V_init, config.tau_out_1, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha*5, config.SG_window);
-        Neu_out.emplace_back(config.V_init, config.tau_out_2, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha*5, config.SG_window);
+        Neu_out.emplace_back(config.V_init, config.tau_out_1, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha_out, config.SG_window);
+        if (config.N_out_times == 1) continue;
+        Neu_out.emplace_back(config.V_init, config.tau_out_2, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha_out, config.SG_window);
         if (config.N_out_times == 2) continue;
-        Neu_out.emplace_back(config.V_init, config.tau_out_3, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha*5, config.SG_window);
-        Neu_out.emplace_back(config.V_init, config.tau_out_4, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha*5, config.SG_window);
+        Neu_out.emplace_back(config.V_init, config.tau_out_3, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha_out, config.SG_window);
+        Neu_out.emplace_back(config.V_init, config.tau_out_4, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha_out, config.SG_window);
+        if (config.N_out_times == 4) continue;
+        Neu_out.emplace_back(config.V_init, config.tau_out_5, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha_out, config.SG_window);
     }
 #else
     Neu_res.reserve(config.N_res);
@@ -134,12 +146,13 @@ Core::Core(const Config& config, const std::vector<int>& tau_values)
 #endif
 
     Neu_acc.resize(config.N_class, 0);
-    N_out_times = config.N_out_times;
 
-    PTE_slide = config.PTE_slide;
-    PTE_times = config.PTE_times;
-    PTE_range = config.PTE_range;
-    ET_N = config.ET_N;
+    size_t A = static_cast<size_t>(0.2 * config.N_res); // 20% 비율
+    Neu_adapt.reserve(A);
+    for (size_t i = 0; i < A; ++i) {
+        Neu_adapt.emplace_back(tau_adapt_default, b_step_default);
+    }
+
 
     /*
     // Check the initialized states of Neu_res, Neu_out
@@ -159,12 +172,35 @@ Core::Core(const Config& config, const std::vector<int>& tau_values)
     std::cout << "PTE_times: " << PTE_times<< std::endl;
     std::cout << "PTE_range: " << PTE_range << std::endl;
     std::cout << "ET_N: " << ET_N<< std::endl;
-
 }
 
 // Copy constructor
 Core::Core(const Core& other)
-    : W_in(other.W_in), W_res(other.W_res), W_out(other.W_out), W_fb(other.W_fb), W_bias(other.W_bias), T_sim(other.T_sim), t_delay(other.t_delay), alpha(other.alpha), Neu_res(other.Neu_res), Neu_out(other.Neu_out), Neu_acc(other.Neu_acc), external_S_queue(other.external_S_queue), internal_S_queue(other.internal_S_queue), S_vec_now(other.S_vec_now), N_out_times(other.N_out_times), enabling_train(other.enabling_train), class_label(other.class_label), lr(other.lr) {
+    : W_in(other.W_in), 
+      W_res(other.W_res), 
+      W_out(other.W_out), 
+      W_fb(other.W_fb), 
+      W_bias(other.W_bias), 
+      W_bias_out(other.W_bias_out), 
+      T_sim(other.T_sim), 
+      t_delay(other.t_delay), 
+      alpha(other.alpha), 
+      alpha_out(other.alpha_out), 
+      Neu_res(other.Neu_res), 
+      Neu_out(other.Neu_out), 
+      Neu_acc(other.Neu_acc), 
+      external_S_queue(other.external_S_queue), 
+      internal_S_queue(other.internal_S_queue), 
+      S_vec_now(other.S_vec_now), 
+      N_out_times(other.N_out_times), 
+      enabling_train(other.enabling_train), 
+      class_label(other.class_label), 
+      lr(other.lr),
+      PTE_slide(other.PTE_slide),
+      PTE_times(other.PTE_times),
+      PTE_range(other.PTE_range),
+      PTE_reg(other.PTE_reg),
+      ET_N(other.ET_N) {
 }
 
 // Assignment operator
@@ -175,9 +211,11 @@ Core& Core::operator=(const Core& other) {
         W_out = other.W_out;
         W_fb = other.W_fb;
         W_bias = other.W_bias;
+        W_bias_out = other.W_bias_out;
         T_sim = other.T_sim;
         t_delay = other.t_delay;
         alpha = other.alpha;
+        alpha_out = other.alpha_out;
         Neu_res = other.Neu_res;
         Neu_out = other.Neu_out;
         Neu_bias = other.Neu_bias;
@@ -189,9 +227,15 @@ Core& Core::operator=(const Core& other) {
         enabling_train = other.enabling_train;
         class_label = other.class_label;
         lr = other.lr;
+        PTE_slide = other.PTE_slide;
+        PTE_times = other.PTE_times;
+        PTE_range = other.PTE_range;
+        PTE_reg = other.PTE_reg;
+        ET_N = other.ET_N;
     }
     return *this;
 }
+
 
 // Reset the core
 void Core::reset() {
@@ -223,6 +267,7 @@ void Core::reset() {
         Neu_out[i].reset_ref();
     }
 
+    for (auto &au : Neu_adapt) au.reset();
 
     while (!external_S_queue.empty()) {
         external_S_queue.pop();
@@ -377,15 +422,25 @@ bool Core::run_loop() {
         }
 
         // std::cout << "PTE_slide: " << PTE_slide << ", PTE_times: " << PTE_times << ", PTE_range: " << PTE_range << std::endl;
-        train_signal = static_cast<size_t>(((static_cast<size_t>(T_now) + PTE_range * PTE_slide) / PTE_range) % PTE_times);
+        train_signal = static_cast<size_t>(((static_cast<size_t>(T_now) + PTE_range * PTE_slide + PTE_range * PTE_reg) / PTE_range) % PTE_times);
+        // train_signal = static_cast<size_t>(((static_cast<size_t>(T_now) + PTE_range * PTE_slide) / PTE_range) % PTE_times);
 #endif
 
         // Parallelize the leak method for Neu_res and Neu_out
         #pragma omp parallel
         {
+            /* 3.1 Neu_res / Neu_out leak */
             #pragma omp for schedule(static)
             for (size_t i = 0; i < Neu_res.size(); ++i) {
                 Neu_res[i].leak(T_now);
+            }
+
+            #pragma omp for schedule(static)
+            for (size_t i = 0; i < Neu_adapt.size(); ++i) {
+                size_t idx_res = Neu_res.size() - Neu_adapt.size() + i;
+                Neu_res[idx_res].adapt(Neu_adapt[i]);
+                
+                Neu_adapt[i].leak(T_now);
             }
 
             #pragma omp for schedule(static)
@@ -410,9 +465,20 @@ bool Core::run_loop() {
                 for (size_t j = 0; j < Neu_out.size(); ++j) {
                     Neu_out[j].in(W_out[id_now][j]);
                 }
-            } else if (layer == 'i') {
+            } 
+            else if (layer == 'i') {
                 for (size_t j = 0; j < Neu_res.size(); ++j) {
                     Neu_res[j].in(W_in[id_now][j]);
+                }
+            }
+            // bias 추가 
+            else if (layer == 'b') {
+                for (size_t j = 0; j < Neu_res.size(); ++j) {
+                    Neu_res[j].in(W_bias[id_now][j]);
+                }
+
+                for (size_t j = 0; j < Neu_out.size(); ++j) {
+                    Neu_out[j].in(W_bias_out[id_now][j]);
                 }
             }
         }
@@ -455,10 +521,12 @@ bool Core::run_loop() {
                                         std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
                                         std::pair<int, char> neu_id = std::make_pair(i, 'r');
                                         Event_unit event(T_now + t_delay, spk_id, neu_id, true);
+
                                         #pragma omp critical
                                         {
                                             Event_queue_delay.push(event);
                                         }
+                                        
                                     }
                                     /*
                                     else if (layer == 'i') {
@@ -480,6 +548,9 @@ bool Core::run_loop() {
 
                                 for (int n = 1; n < ET_N + 1; ++n) {
                                     S_vec_trace.push(Spike(T_now + t_delay + n, {i, 'r'}));
+                                    // S_vec_trace.push(Spike(T_now + t_delay + i/100 * 100  + n, {i, 'r'}));
+                                    // S_vec_trace.push(Spike(T_now + t_delay + i/5 * 100  + n, {i, 'r'}));
+                                    // S_vec_trace.push(Spike(T_now + t_delay - i + n, {i, 'r'}));
                                 }
                             }
 #endif
@@ -487,7 +558,16 @@ bool Core::run_loop() {
                         #pragma omp critical
                         {
                             internal_S_queue.push(Spike(T_now + t_delay, {i, 'r'}));
+                            // internal_S_queue.push(Spike(T_now + t_delay + i/100 * 100 , {i, 'r'}));
+                            // internal_S_queue.push(Spike(T_now + t_delay + i/10 * 100 , {i, 'r'}));
+                            // internal_S_queue.push(Spike(T_now + t_delay - i, {i, 'r'}));
                         }
+
+                        if (i >= Neu_res.size() - Neu_adapt.size()) {
+                        size_t ia = i - (Neu_res.size() - Neu_adapt.size());
+                        Neu_adapt[ia].up();
+                        }
+
                         Neu_res[i].reset();
                     }
                 }
@@ -499,6 +579,7 @@ bool Core::run_loop() {
                 for (size_t i = 0; i < Neu_out.size(); ++i) {
                     if (Neu_out[i].is_firing()) {
                         bool SG_now = Neu_out[i].get_SG();
+
 #if defined(TRAIN_PHASE)
                         if (enabling_train && !train_signal)
 #else
@@ -506,6 +587,7 @@ bool Core::run_loop() {
 #endif
                         {
                             if ( (static_cast<size_t>(i / N_out_times) != class_now) && (static_cast<size_t>(i % N_out_times) == train_index) ) {
+                            // if ( (static_cast<size_t>(i / N_out_times) != class_now) ){
                                 if (SG_now) {
                                     for (const auto& S_now : S_vec_now) {
                                         int id_now = S_now.id.first;
@@ -558,35 +640,98 @@ bool Core::run_loop() {
                                     {
                                         Event_queue.push(event);
                                     }
+                                    // eligibility trace code for DFA
+                                    for (const auto& S_now : S_vec_trace_now) {
+                                        int id_now = S_now.id.first;
+                                        char layer = S_now.id.second;
+
+                                        if (layer == 'r') {
+                                            std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
+                                            Event_unit event(T_now, spk_id, E_now.neu_id, false == W_fb[neu_id_now][i]);
+                                            #pragma omp critical
+                                            {
+                                                Event_queue.push(event);
+                                            }
+                                        }
+                                    }
+
+                                    
+        // 20241223 now updating
+        /*
+        #if defined(TRAIN_ELIGIBLETRACE)
+                                    for (const auto& S_now : S_vec_trace_now) {
+                                        int id_now = S_now.id.first;
+                                        char layer = S_now.id.second;
+
+                                        if (layer == 'r') {
+                                            std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
+                                            Event_unit event(T_now, spk_id, E_now.neu_id, false == W_fb[neu_id_now][i]);
+                                            #pragma omp critical
+                                            {
+                                                Event_queue.push(event);
+                                            }
+                                        }
+                                    }
+        #endif
+        */
                                 }
     #endif
                             }
                         }
+                        // new! winner takes all!
+                        
+                        // for (size_t w = 0; w < Neu_out.size(); ++w) {
+                            // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.05);
+                            // else Neu_out[w].in(-0.05);
+                            // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.1);
+                            // else Neu_out[w].in(-0.1);
+                            // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.1);
+                            // else Neu_out[w].in(-0.1);
+                        // }
+                       
+                        // for (size_t w = 0; w < Neu_out.size(); ++w) {
+                            // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.05);
+                            // else Neu_out[w].in(-0.05);
+                            // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.1);
+                            // else Neu_out[w].in(-0.1);
+                            // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.1);
+                            // if (static_cast<size_t>(i / N_out_times) != (w / N_out_times)) Neu_out[w].in(-0.1);
+                            // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.25);
+                        // }
                         Neu_out[i].reset();
                         #pragma omp atomic
                         Neu_acc[static_cast<size_t>(i / N_out_times)] += 1;
+
+                       
                     }
 #if defined(TRAIN_PHASE)
-                // not firing but give the chance to negative update
-                // there is missing case on on-train-phase
-                // if SG is on, then the SG_ref would be flagged
-                // only ref 4 case ! and training_singal is 4 !
-                else if (enabling_train && !train_signal && Neu_out[i].is_ref(T_now) && Neu_out[i].is_SG_ref(T_now) && (static_cast<size_t>(i / N_out_times) != class_now) && (static_cast<size_t>(i % N_out_times) == train_index) ){
-                    for (const auto& S_now : S_vec_now) {
-                        int id_now = S_now.id.first;
-                        char layer = S_now.id.second;
+                    // not firing but give the chance to negative update
+                    // there is missing case on on-train-phase
+                    // if SG is on, then the SG_ref would be flagged
+                    // only ref 4 case ! and training_singal is 4 !
+                    else if (enabling_train && !train_signal && Neu_out[i].is_ref(T_now) && Neu_out[i].is_SG_ref(T_now) && (static_cast<size_t>(i / N_out_times) != class_now) && (static_cast<size_t>(i % N_out_times) == train_index) ){
+                    // else if (enabling_train && !train_signal && Neu_out[i].is_ref(T_now) && (static_cast<size_t>(i / N_out_times) != class_now) && (static_cast<size_t>(i % N_out_times) == train_index) ){
+                    // else if (enabling_train && !train_signal && Neu_out[i].is_ref(T_now) && Neu_out[i].is_SG_ref(T_now) && (static_cast<size_t>(i / N_out_times) != class_now) ){
+                    // else if (enabling_train && !train_signal && Neu_out[i].is_ref(T_now) && (static_cast<size_t>(i / N_out_times) != class_now) ){
+                        
+                        // 20250130 new!
+                        // Neu_out[i].SG_ref_off(T_now);
 
-                        if (layer == 'r') {
-                            std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
-                            std::pair<int, char> neu_id = std::make_pair(i, 'o');
-                            Event_unit event(T_now, spk_id, neu_id, false);
-                            #pragma omp critical
-                            {
-                                Event_queue.push(event);
+                        for (const auto& S_now : S_vec_now) {
+                            int id_now = S_now.id.first;
+                            char layer = S_now.id.second;
+
+                            if (layer == 'r') {
+                                std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
+                                std::pair<int, char> neu_id = std::make_pair(i, 'o');
+                                Event_unit event(T_now, spk_id, neu_id, false);
+                                #pragma omp critical
+                                {
+                                    Event_queue.push(event);
+                                }
                             }
                         }
                     }
-                }
 #endif
             }
             }
@@ -601,6 +746,9 @@ bool Core::run_loop() {
                 for (int k = 0; k < N_out_times; ++k) {
         #if defined(REFRACTORY)
                     if (!Neu_out[class_now * N_out_times + k].is_firing() && !Neu_out[class_now * N_out_times + k].is_ref(T_now) && k == train_index && !Neu_out[class_now * N_out_times + k].is_SG_ref(T_now)) {
+                    // if (!Neu_out[class_now * N_out_times + k].is_firing() && !Neu_out[class_now * N_out_times + k].is_ref(T_now) && k == train_index) {
+                    // if (!Neu_out[class_now * N_out_times + k].is_firing() && !Neu_out[class_now * N_out_times + k].is_ref(T_now) && !Neu_out[class_now * N_out_times + k].is_SG_ref(T_now)) {
+                    // if (!Neu_out[class_now * N_out_times + k].is_firing() && !Neu_out[class_now * N_out_times + k].is_ref(T_now)) {
         #endif
                         bool SG_now = Neu_out[class_now * N_out_times + k].get_SG();
                         if (SG_now) {
@@ -657,6 +805,25 @@ bool Core::run_loop() {
                             {
                                 Event_queue.push(event);
                             }
+                            
+    // 20241223 now updating
+    /*
+    #if defined(TRAIN_ELIGIBLETRACE)
+                                for (const auto& S_now : S_vec_trace_now) {
+                                    int id_now = S_now.id.first;
+                                    char layer = S_now.id.second;
+
+                                    if (layer == 'r') {
+                                        std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
+                                        Event_unit event(T_now, spk_id, E_now.neu_id, true == W_fb[neu_id_now][class_now*N_out_times + k]);
+                                        #pragma omp critical
+                                        {
+                                            Event_queue.push(event);
+                                        }
+                                    }
+                                }
+    #endif
+    */
                         }
 #endif
                     }
@@ -691,11 +858,13 @@ bool Core::run_loop() {
                     if (sign) {
                         #pragma omp atomic
                         W_out[spk_id_now][neu_id_now] += lr;  // alpha 사용
+                        
                         if (W_out[spk_id_now][neu_id_now] > 1.0) 
                             W_out[spk_id_now][neu_id_now] = 1.0;
                     } else {
                         #pragma omp atomic
                         W_out[spk_id_now][neu_id_now] -= lr;
+                        
                         if (W_out[spk_id_now][neu_id_now] < -1.0) 
                             W_out[spk_id_now][neu_id_now] = -1.0;
                     }
@@ -706,13 +875,18 @@ bool Core::run_loop() {
                 else if (spk_l_now == 'r' && neu_l_now == 'r'){
                     if (sign) {
                         #pragma omp atomic
-                        W_res[spk_id_now][neu_id_now] += lr*0.1;
-                        if (W_res[spk_id_now][neu_id_now] > 0.10) W_res[spk_id_now][neu_id_now] = 0.1;
+                        W_res[spk_id_now][neu_id_now] += lr;
+                        
+                        if (W_res[spk_id_now][neu_id_now] > 1) 
+                        W_res[spk_id_now][neu_id_now] = 1.0;
                     } else {
                         #pragma omp atomic
-                        W_res[spk_id_now][neu_id_now] -= lr*0.1;
-                        if (W_res[spk_id_now][neu_id_now] < -0.10) W_res[spk_id_now][neu_id_now] = -0.1;
+                        W_res[spk_id_now][neu_id_now] -= lr;
+                        
+                        if (W_res[spk_id_now][neu_id_now] < -1) 
+                        W_res[spk_id_now][neu_id_now] = -1.0;
                     }
+                    // std::cout << "After update: W_res[" << spk_id_now << "][" << neu_id_now << "] = " << W_res[spk_id_now][neu_id_now] << std::endl;
                 }
                 /*
                 else if (spk_l_now == 'i' && neu_l_now == 'r'){
@@ -749,12 +923,17 @@ bool Core::run_loop() {
             #pragma omp parallel for
             for (size_t j = 0; j < Neu_res.size(); ++j) {
                 for (size_t i = 0; i < Neu_out.size(); ++i) {
-                    #pragma omp atomic
-                    W_out[i][j] -= lr * 0.1 * W_out[i][j];
+                    // W_out[i][j] -= lr * 0.1 * W_out[i][j];
 
-                    //if (W_out[i][j] > 0) W_out[i][j] -= lr
-                    //else W_out[i][j] += lr
-
+                    if (W_out[i][j] > 0) 
+                    {
+                        #pragma omp atomic
+                        W_out[i][j] -= lr;
+                    }
+                    else {
+                        #pragma omp atomic
+                        W_out[i][j] += lr;
+                    }
                 }
             }
         }*/
@@ -770,7 +949,7 @@ bool Core::run_loop() {
         Event_vec_now.shrink_to_fit();
     }
 #if defined(TRAIN_PHASE)
-    PTE_slide = static_cast<size_t>((PTE_slide + PTE_range) % PTE_times);
+    // PTE_slide = static_cast<size_t>((PTE_slide + PTE_range) % PTE_times);
 #endif
     // train_index = (train_index + 1) % N_out_times;
 
@@ -779,7 +958,7 @@ bool Core::run_loop() {
 
     /*
     // Neu_out 상태 출력 추가
-    std::cout << "\nNeu_out final states:" << std::endl;
+    std::cout << "\nNeu_out final states:" << static_cast<int>(max_index) << std::endl;
     std::cout << "Class label: " << class_now << std::endl;
     std::cout << "Accumulated spikes per class:" << std::endl;
     for(size_t i = 0; i < Neu_acc.size(); i++) {
@@ -794,8 +973,46 @@ bool Core::run_loop() {
 void Core::load_spike_train(const std::vector<uint32_t>& spike_times, const std::vector<uint16_t>& neuron_indices) {
     while (!external_S_queue.empty()) external_S_queue.pop();
     for (size_t i = 0; i < spike_times.size(); ++i) {
-        if (neuron_indices[i] < 144) external_S_queue.push(Spike(spike_times[i], {neuron_indices[i], 'i'}));
-        else external_S_queue.push(Spike(spike_times[i], {neuron_indices[i] - 144, 'b'}));
+        // std::cout << neuron_indices[i] << " " << std::endl;
+        // if (neuron_indices[i] < 1000) external_S_queue.push(Spike(spike_times[i], {neuron_indices[i], 'i'}));
+        // else external_S_queue.push(Spike(spike_times[i], {neuron_indices[i] - 700, 'b'}));
+        external_S_queue.push(Spike(spike_times[i], {neuron_indices[i], 'i'}));
+    }
+}
+
+void Core::load_bias_spike_train(const std::vector<uint32_t>& spike_times,
+                                 const std::vector<uint16_t>& neuron_indices) {
+    // bias 채널 개수 결정 (0부터 max 인덱스까지)
+    uint16_t num_bias_neurons = *std::max_element(neuron_indices.begin(), neuron_indices.end()) + 1;
+
+    // 1) 랜덤 매핑 테이블 생성
+    std::vector<uint16_t> random_indices(num_bias_neurons);
+    std::iota(random_indices.begin(), random_indices.end(), 0);
+
+    std::random_device rd;
+    std::seed_seq seq{rd(), rd(), rd(), rd()};
+    std::mt19937 gen(seq);
+    std::shuffle(random_indices.begin(), random_indices.end(), gen);
+
+    // 2) 각 뉴런별 스파이크 뒤집기 여부 결정
+    std::bernoulli_distribution flip(0.5);
+    std::vector<bool> should_flip(num_bias_neurons);
+    for (uint16_t i = 0; i < num_bias_neurons; ++i) {
+        should_flip[i] = flip(gen);
+    }
+
+    const uint32_t MAX_TIME = 1000000; // 1초 = 1,000,000μs
+
+    // 3) 랜덤 매핑 및 뒤집기 적용해 external_S_queue에 추가
+    for (size_t i = 0; i < spike_times.size(); ++i) {
+        uint32_t t = spike_times[i];
+        uint16_t nid = neuron_indices[i];
+        if (should_flip[random_indices[nid]]) {
+            t = MAX_TIME - t;
+        }
+        external_S_queue.push(
+            Spike(t,
+                  std::make_pair((size_t)random_indices[nid], 'b')));
     }
 }
 
@@ -817,6 +1034,7 @@ void Core::save_weights(const std::string& filename) const {
     weights_json["W_res"] = W_res;
     weights_json["W_out"] = W_out;
     weights_json["W_bias"] = W_bias;
+    weights_json["W_bias_out"] = W_bias_out;
 
     file << weights_json.dump(4);
     file.close();
