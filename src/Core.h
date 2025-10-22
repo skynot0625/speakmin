@@ -45,6 +45,7 @@ private:
     std::vector<std::vector<double>> W_in, W_res, W_out, W_bias;
     std::vector<std::vector<bool>> W_fb;
     std::vector<Neuron> Neu_res, Neu_out, Neu_bias;
+    std::vector<Neuron> Neu_out_1, Neu_out_2;
     std::vector<size_t> Neu_acc;
     std::priority_queue<Spike> external_S_queue;
     std::priority_queue<Spike> internal_S_queue;
@@ -58,6 +59,7 @@ private:
     std::priority_queue<Event_unit> Event_queue_delay;
     uint32_t t_delay;
     size_t N_out_times;
+    double alpha;
 
     std::vector<uint32_t> recorded_times;
     std::vector<uint16_t> recorded_neuron_indices;

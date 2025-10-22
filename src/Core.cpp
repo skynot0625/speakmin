@@ -32,6 +32,10 @@ Core::Core(const std::string& param_file, const std::string& weights_file, const
     config.t_delay = param_json["core_parameter"]["t_delay"].get<uint32_t>();
     config.V_init = param_json["core_parameter"]["V_init"].get<double>();
     config.tau_out = param_json["core_parameter"]["tau_out"].get<double>();
+    config.tau_out_1 = param_json["core_parameter"]["tau_out_1"].get<double>();
+    config.tau_out_2 = param_json["core_parameter"]["tau_out_2"].get<double>();
+    config.tau_out_3 = param_json["core_parameter"]["tau_out_1"].get<double>();
+    config.tau_out_4 = param_json["core_parameter"]["tau_out_2"].get<double>();
     config.V_th = param_json["core_parameter"]["V_th"].get<double>();
     config.V_bot = param_json["core_parameter"]["V_bot"].get<double>();
     config.V_reset = param_json["core_parameter"]["V_reset"].get<double>();
@@ -39,6 +43,7 @@ Core::Core(const std::string& param_file, const std::string& weights_file, const
 #if defined(REFRACTORY)
     config.t_ref = param_json["core_parameter"]["t_ref"].get<uint32_t>();
 #endif
+    config.alpha = param_json["core_parameter"]["alpha"].get<double>();
     config.N_in = param_json["core_parameter"]["N_in"].get<int>();
     config.N_res = param_json["core_parameter"]["N_res"].get<int>();
     config.N_out = param_json["core_parameter"]["N_out"].get<int>();
@@ -100,17 +105,21 @@ Core::Core(const std::string& param_file, const std::string& weights_file, const
 
 // Core constructor with configuration and tau values
 Core::Core(const Config& config, const std::vector<int>& tau_values)
-    : W_in(config.W_in), W_res(config.W_res), W_out(config.W_out), W_fb(config.W_fb), W_bias(config.W_bias), T_sim(config.T_sim), t_delay(config.t_delay) {
+    : W_in(config.W_in), W_res(config.W_res), W_out(config.W_out), W_fb(config.W_fb), W_bias(config.W_bias), T_sim(config.T_sim), t_delay(config.t_delay), alpha(config.alpha) {
 
 #if defined(REFRACTORY)
     Neu_res.reserve(config.N_res);
     for (int i = 0; i < config.N_res; ++i) {
-        Neu_res.emplace_back(config.V_init, tau_values[i], config.V_th, config.V_bot, config.V_reset, config.t_ref, config.SG_window);
+        Neu_res.emplace_back(config.V_init, tau_values[i], config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha, config.SG_window);
     }
 
     Neu_out.reserve(config.N_out);
-    for (int i = 0; i < config.N_out; ++i) {
-        Neu_out.emplace_back(config.V_init, config.tau_out, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.SG_window);
+    for (int i = 0; i < config.N_class; ++i) {
+        Neu_out.emplace_back(config.V_init, config.tau_out_1, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha*5, config.SG_window);
+        Neu_out.emplace_back(config.V_init, config.tau_out_2, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha*5, config.SG_window);
+        if (config.N_out_times == 2) continue;
+        Neu_out.emplace_back(config.V_init, config.tau_out_3, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha*5, config.SG_window);
+        Neu_out.emplace_back(config.V_init, config.tau_out_4, config.V_th, config.V_bot, config.V_reset, config.t_ref, config.alpha*5, config.SG_window);
     }
 #else
     Neu_res.reserve(config.N_res);
@@ -155,7 +164,7 @@ Core::Core(const Config& config, const std::vector<int>& tau_values)
 
 // Copy constructor
 Core::Core(const Core& other)
-    : W_in(other.W_in), W_res(other.W_res), W_out(other.W_out), W_fb(other.W_fb), W_bias(other.W_bias), T_sim(other.T_sim), t_delay(other.t_delay), Neu_res(other.Neu_res), Neu_out(other.Neu_out), Neu_acc(other.Neu_acc), external_S_queue(other.external_S_queue), internal_S_queue(other.internal_S_queue), S_vec_now(other.S_vec_now), N_out_times(other.N_out_times), enabling_train(other.enabling_train), class_label(other.class_label), lr(other.lr) {
+    : W_in(other.W_in), W_res(other.W_res), W_out(other.W_out), W_fb(other.W_fb), W_bias(other.W_bias), T_sim(other.T_sim), t_delay(other.t_delay), alpha(other.alpha), Neu_res(other.Neu_res), Neu_out(other.Neu_out), Neu_acc(other.Neu_acc), external_S_queue(other.external_S_queue), internal_S_queue(other.internal_S_queue), S_vec_now(other.S_vec_now), N_out_times(other.N_out_times), enabling_train(other.enabling_train), class_label(other.class_label), lr(other.lr) {
 }
 
 // Assignment operator
@@ -168,6 +177,7 @@ Core& Core::operator=(const Core& other) {
         W_bias = other.W_bias;
         T_sim = other.T_sim;
         t_delay = other.t_delay;
+        alpha = other.alpha;
         Neu_res = other.Neu_res;
         Neu_out = other.Neu_out;
         Neu_bias = other.Neu_bias;
@@ -468,8 +478,8 @@ bool Core::run_loop() {
                             #pragma omp critical
                             {
 
-                                for (int n = 0; n < ET_N; ++n) {
-                                    S_vec_trace.push(Spike(T_now + t_delay + n + 1, {i, 'r'}));
+                                for (int n = 1; n < ET_N + 1; ++n) {
+                                    S_vec_trace.push(Spike(T_now + t_delay + n, {i, 'r'}));
                                 }
                             }
 #endif
@@ -680,12 +690,14 @@ bool Core::run_loop() {
                 if (spk_l_now == 'r' && neu_l_now == 'o') {
                     if (sign) {
                         #pragma omp atomic
-                        W_out[spk_id_now][neu_id_now] += lr*0.1;
-                        if (W_out[spk_id_now][neu_id_now] > 1.0*0.1) W_out[spk_id_now][neu_id_now] = 1.0*0.1;
+                        W_out[spk_id_now][neu_id_now] += lr;  // alpha 사용
+                        if (W_out[spk_id_now][neu_id_now] > 1.0) 
+                            W_out[spk_id_now][neu_id_now] = 1.0;
                     } else {
                         #pragma omp atomic
-                        W_out[spk_id_now][neu_id_now] -= lr*0.1;
-                        if (W_out[spk_id_now][neu_id_now] < -1.0*0.1) W_out[spk_id_now][neu_id_now] = -1.0*0.1;
+                        W_out[spk_id_now][neu_id_now] -= lr;
+                        if (W_out[spk_id_now][neu_id_now] < -1.0) 
+                            W_out[spk_id_now][neu_id_now] = -1.0;
                     }
                 }
                 // std::cout << "After update: W_out[" << spk_id_now << "][" << neu_id_now << "] = " << W_out[spk_id_now][neu_id_now] << std::endl;
@@ -758,7 +770,7 @@ bool Core::run_loop() {
         Event_vec_now.shrink_to_fit();
     }
 #if defined(TRAIN_PHASE)
-    PTE_slide = static_cast<size_t>((PTE_slide + 1) % PTE_times);
+    PTE_slide = static_cast<size_t>((PTE_slide + PTE_range) % PTE_times);
 #endif
     // train_index = (train_index + 1) % N_out_times;
 

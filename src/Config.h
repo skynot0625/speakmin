@@ -15,12 +15,17 @@ struct Config {
     double t_delay;
     double V_init;
     double tau_out;
+    double tau_out_1;
+    double tau_out_2;
+    double tau_out_4;
+    double tau_out_3;
     double V_th;
     double V_bot;
     double V_reset;
 #if defined(REFRACTORY)
     double t_ref;
 #endif
+    double alpha;
     double SG_window;
 
     int N_in;

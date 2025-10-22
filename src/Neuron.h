@@ -18,6 +18,7 @@ private:
     uint32_t T_last;     // Time of the last update for leaky computation
     double SG_window;  // Window for computing surrogate gradient
     uint32_t T_SG;       // Time for surrogate gradient calculation
+    double alpha;
 
 #if defined(REFRACTORY)
     uint32_t T_ref;      // End of refractory period
@@ -26,11 +27,11 @@ private:
 
 public:
 #if defined(REFRACTORY)
-    Neuron(double V_init, double tau, double V_th, double V_bot, double V_reset, uint32_t t_ref, double SG_window)
-        : V_mem(V_init), tau(tau), V_th(V_th), V_bot(V_bot), V_reset(V_reset), T_now(0), T_last(0), SG_window(SG_window), T_SG(0), T_ref(0), t_ref(t_ref) {}
+    Neuron(double V_init, double tau, double V_th, double V_bot, double V_reset, uint32_t t_ref, double alpha, double SG_window)
+        : V_mem(V_init), tau(tau), V_th(V_th), V_bot(V_bot), V_reset(V_reset), T_now(0), T_last(0), SG_window(SG_window), alpha(alpha), T_SG(0), T_ref(0), t_ref(t_ref) {}
 #else
-    Neuron(double V_init, double tau, double V_th, double V_bot, double V_reset, double SG_window)
-        : V_mem(V_init), tau(tau), V_th(V_th), V_bot(V_bot), V_reset(V_reset), T_now(0), T_last(0), SG_window(SG_window), T_SG(0) {}
+    Neuron(double V_init, double tau, double V_th, double V_bot, double V_reset, double SG_window, double alpha)
+        : V_mem(V_init), tau(tau), V_th(V_th), V_bot(V_bot), V_reset(V_reset), T_now(0), T_last(0), SG_window(SG_window), alpha(alpha), T_SG(0) {}
 #endif
 
     // Getter methods
@@ -61,7 +62,7 @@ public:
             return;
         }
 #endif
-        V_mem += input;
+        V_mem += alpha* input;
         // clamped V_mem
         if (V_mem < V_bot) V_mem = V_bot;
     }
