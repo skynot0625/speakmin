@@ -142,10 +142,10 @@ core_parameters = {
     "N_bias": num_neu_bias,
     "N_class": num_class,
     "N_out_times": num_out_times,
-    "PTE_slide": num_out_times,
-    "PTE_times": 1000,
-    "PTE_range": num_out_times,
-    "ET_N": 16,
+    "PTE_slide": 1,
+    "PTE_times": 100,
+    "PTE_range": 1,
+    "ET_N": 15,
 }
 
 # Define the system parameters dictionary

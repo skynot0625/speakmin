@@ -1,5 +1,6 @@
 {
     "files.associations": {
+<<<<<<< HEAD
         "ostream": "cpp",
         "random": "cpp",
         "any": "cpp",
@@ -65,5 +66,8 @@
         "cinttypes": "cpp",
         "typeinfo": "cpp",
         "valarray": "cpp"
+=======
+        "ostream": "cpp"
+>>>>>>> 05416bb (Fix merge conflicts and update files)
     }
 }
