@@ -262,7 +262,8 @@ double run_simulation(Core& core_template,
                                  chunk_labels, chunk_offsets);
 
         // bias spike train 로드
-        std::string bias_file_path = "/home/sungminlee/speakmin/tools/speech-to-spikes/gen_bias_spike/bias_spikes_1Hz.bin"; // 40Hz가 잘나옴
+        // std::string bias_file_path = "/home/sungminlee/speakmin/tools/speech-to-spikes/gen_bias_spike/bias_spikes_1Hz.bin"; // 40Hz가 잘나옴
+        std::string bias_file_path = "/home/sungminlee/speakmin/tools/speech-to-spikes/gen_bias_spike/dataset_output_chunks/bias_spikes_chunk0_10Hz.bin";
         // std::cout<< "Loading bias spike train from: " << bias_file_path << std::endl;
         int bias_entries;
         std::vector<std::streampos> bias_offsets = calculate_offsets(bias_file_path, bias_entries);
@@ -277,7 +278,8 @@ double run_simulation(Core& core_template,
             core_template.reset();
             core_template.enabling_train = enabling_train;
             core_template.load_spike_train(chunk_spike_times[i], chunk_neuron_indices[i]);
-            core_template.load_bias_spike_train(bias_spike_times[0], bias_neuron_indices[0]);
+            // core_template.load_bias_spike_train(bias_spike_times[0], bias_neuron_indices[0]);
+            core_template.load_bias_spike_train(bias_spike_times[i], bias_neuron_indices[i]);
             core_template.class_label = chunk_labels[i];
             
             bool is_correct = core_template.run();

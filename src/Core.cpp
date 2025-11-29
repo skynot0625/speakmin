@@ -153,7 +153,6 @@ Core::Core(const Config& config, const std::vector<int>& tau_values)
         Neu_adapt.emplace_back(tau_adapt_default, b_step_default);
     }
 
-
     /*
     // Check the initialized states of Neu_res, Neu_out
     std::cout << "Neu_res size: " << Neu_res.size() << std::endl;
@@ -438,9 +437,13 @@ bool Core::run_loop() {
             #pragma omp for schedule(static)
             for (size_t i = 0; i < Neu_adapt.size(); ++i) {
                 size_t idx_res = Neu_res.size() - Neu_adapt.size() + i;
-                Neu_res[idx_res].adapt(Neu_adapt[i]);
-                
                 Neu_adapt[i].leak(T_now);
+#if defined(REFRACTORY)
+                if (Neu_res[idx_res].is_ref(T_now)) {
+                    continue;   
+                }
+#endif
+                Neu_res[idx_res].adapt(Neu_adapt[i]);
             }
 
             #pragma omp for schedule(static)
@@ -520,7 +523,8 @@ bool Core::run_loop() {
                                     if (layer == 'r') {
                                         std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
                                         std::pair<int, char> neu_id = std::make_pair(i, 'r');
-                                        Event_unit event(T_now + t_delay, spk_id, neu_id, true);
+                                        // Event_unit event(T_now + t_delay, spk_id, neu_id, true);
+                                        Event_unit event(T_now + t_delay + i/10 * 300, spk_id, neu_id, true);
 
                                         #pragma omp critical
                                         {
@@ -547,7 +551,38 @@ bool Core::run_loop() {
                             {
 
                                 for (int n = 1; n < ET_N + 1; ++n) {
+                                    /*
                                     S_vec_trace.push(Spike(T_now + t_delay + n, {i, 'r'}));
+                                    // 1000(0), 2000(1000), 3000(2000), 4000(3000) ms later spikes for eligibility trace
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 1000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 2000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 3000, {i, 'r'}));
+                                    // 
+                                    */
+                                    for (int m = 0; m < 100; ++m) {
+                                        S_vec_trace.push(Spike(T_now + t_delay + i/10 * 300 + 1000*m + n, {i, 'r'}));
+                                    }
+
+                                    /*
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 4000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 5000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 6000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 7000, {i, 'r'}));
+                                    
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 8000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 9000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 10000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 11000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 12000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 13000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 14000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 15000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 16000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 17000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 18000, {i, 'r'}));
+                                    S_vec_trace.push(Spike(T_now + t_delay + n + 19000, {i, 'r'}));
+                                    */
+                                    
                                     // S_vec_trace.push(Spike(T_now + t_delay + i/100 * 100  + n, {i, 'r'}));
                                     // S_vec_trace.push(Spike(T_now + t_delay + i/5 * 100  + n, {i, 'r'}));
                                     // S_vec_trace.push(Spike(T_now + t_delay - i + n, {i, 'r'}));
@@ -557,9 +592,9 @@ bool Core::run_loop() {
                         }
                         #pragma omp critical
                         {
-                            internal_S_queue.push(Spike(T_now + t_delay, {i, 'r'}));
+                            // internal_S_queue.push(Spike(T_now + t_delay, {i, 'r'}));
                             // internal_S_queue.push(Spike(T_now + t_delay + i/100 * 100 , {i, 'r'}));
-                            // internal_S_queue.push(Spike(T_now + t_delay + i/10 * 100 , {i, 'r'}));
+                            internal_S_queue.push(Spike(T_now + t_delay + i/10 * 300 , {i, 'r'}));
                             // internal_S_queue.push(Spike(T_now + t_delay - i, {i, 'r'}));
                         }
 
@@ -689,15 +724,15 @@ bool Core::run_loop() {
                             // else Neu_out[w].in(-0.1);
                         // }
                        
-                        // for (size_t w = 0; w < Neu_out.size(); ++w) {
+                        for (size_t w = 0; w < Neu_out.size(); ++w) {
                             // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.05);
                             // else Neu_out[w].in(-0.05);
                             // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.1);
                             // else Neu_out[w].in(-0.1);
                             // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.1);
-                            // if (static_cast<size_t>(i / N_out_times) != (w / N_out_times)) Neu_out[w].in(-0.1);
-                            // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.25);
-                        // }
+                            if (static_cast<size_t>(i / N_out_times) != (w / N_out_times)) Neu_out[w].in(-0.1);
+                            // if (static_cast<size_t>(i / N_out_times) != (w / N_out_times)) Neu_out[w].in(-0.25);
+                        }
                         Neu_out[i].reset();
                         #pragma omp atomic
                         Neu_acc[static_cast<size_t>(i / N_out_times)] += 1;
