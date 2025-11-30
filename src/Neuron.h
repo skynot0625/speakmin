@@ -126,7 +126,7 @@ public:
     /* ---------- Adaptive current coupling ---------- */
     // adapt_unit 의 I를 막전위에서 감산 ( = 음의 입력 )
     inline void adapt(const AdaptUnit& AU) {
-        V_mem -= 1/tau * AU.get_I();
+        V_mem -= (1 - std::exp(-(static_cast<double>(T_now - T_last)) / tau)) * AU.get_I();
         if (V_mem < V_bot) V_mem = V_bot;
     }
 };
