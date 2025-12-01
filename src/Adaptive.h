@@ -21,6 +21,8 @@ public:
         // 첫 호출 시 T_last==0일 때 과도 왜곡 방지
         if (T_last == 0) { T_last = T_now; return; }
         I_adapt *= std::exp(-(static_cast<double>(T_now - T_last)) / tau_adapt);
+    }
+    inline void T_set(uint32_t T_now) {
         T_last   = T_now;
     }
 

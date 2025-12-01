@@ -439,11 +439,11 @@ bool Core::run_loop() {
                 size_t idx_res = Neu_res.size() - Neu_adapt.size() + i;
                 Neu_adapt[i].leak(T_now);
 #if defined(REFRACTORY)
-                if (Neu_res[idx_res].is_ref(T_now)) {
-                    continue;   
+                if (!Neu_res[idx_res].is_ref(T_now)) {
+                    Neu_res[idx_res].adapt(Neu_adapt[i]); 
                 }
 #endif
-                Neu_res[idx_res].adapt(Neu_adapt[i]);
+                Neu_adapt[i].T_set(T_now);
             }
 
             #pragma omp for schedule(static)
@@ -480,9 +480,9 @@ bool Core::run_loop() {
                     Neu_res[j].in(W_bias[id_now][j]);
                 }
 
-                for (size_t j = 0; j < Neu_out.size(); ++j) {
-                    Neu_out[j].in(W_bias_out[id_now][j]);
-                }
+                // for (size_t j = 0; j < Neu_out.size(); ++j) {
+                //    Neu_out[j].in(W_bias_out[id_now][j]);
+                // }
             }
         }
 #if defined(TRAIN_FA) || defined(TRAIN_DFA)
@@ -551,17 +551,20 @@ bool Core::run_loop() {
                             {
 
                                 for (int n = 1; n < ET_N + 1; ++n) {
+                                    for (int m = 0; m < 100; ++m) {
+                                         S_vec_trace.push(Spike(T_now + t_delay + 1000*m + n + 10*m, {i, 'r'}));
+                                    }
+                                    // S_vec_trace.push(Spike(T_now + t_delay + n, {i, 'r'}));
                                     /*
-                                    S_vec_trace.push(Spike(T_now + t_delay + n, {i, 'r'}));
                                     // 1000(0), 2000(1000), 3000(2000), 4000(3000) ms later spikes for eligibility trace
                                     S_vec_trace.push(Spike(T_now + t_delay + n + 1000, {i, 'r'}));
                                     S_vec_trace.push(Spike(T_now + t_delay + n + 2000, {i, 'r'}));
                                     S_vec_trace.push(Spike(T_now + t_delay + n + 3000, {i, 'r'}));
                                     // 
                                     */
-                                    for (int m = 0; m < 100; ++m) {
-                                        S_vec_trace.push(Spike(T_now + t_delay + i/10 * 300 + 1000*m + n, {i, 'r'}));
-                                    }
+                                    // for (int m = 0; m < 100; ++m) {
+                                    //     S_vec_trace.push(Spike(T_now + t_delay + i/10 * 300 + 1000*m + n, {i, 'r'}));
+                                    // }
 
                                     /*
                                     S_vec_trace.push(Spike(T_now + t_delay + n + 4000, {i, 'r'}));
@@ -592,9 +595,9 @@ bool Core::run_loop() {
                         }
                         #pragma omp critical
                         {
-                            // internal_S_queue.push(Spike(T_now + t_delay, {i, 'r'}));
+                            internal_S_queue.push(Spike(T_now + t_delay, {i, 'r'}));
                             // internal_S_queue.push(Spike(T_now + t_delay + i/100 * 100 , {i, 'r'}));
-                            internal_S_queue.push(Spike(T_now + t_delay + i/10 * 300 , {i, 'r'}));
+                            // internal_S_queue.push(Spike(T_now + t_delay + i/10 * 300 , {i, 'r'}));
                             // internal_S_queue.push(Spike(T_now + t_delay - i, {i, 'r'}));
                         }
 

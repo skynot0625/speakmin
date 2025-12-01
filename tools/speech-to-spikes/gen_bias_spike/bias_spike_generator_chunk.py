@@ -60,7 +60,7 @@ def generate_bias_chunk_file(output_file, hz, duration_us, num_bias_neurons,
 
 if __name__ == "__main__":
     # --- 설정 파라미터 ---
-    HZ = 10           # 10Hz
+    HZ = 1           # 10Hz
     DURATION_US = 1000000 
     NUM_NEURONS = 40
     
