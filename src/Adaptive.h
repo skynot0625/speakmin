@@ -27,7 +27,9 @@ public:
     }
 
     inline void up() noexcept { I_adapt += b_step; }
-    [[nodiscard]] inline double get_I() const noexcept { return I_adapt; }
+    
+    inline double get_I(uint32_t T_now) const noexcept { return I_adapt * (T_now - T_last); }
+    
     inline void reset() noexcept { I_adapt = 0.0; T_last = 0; }
 };
 
