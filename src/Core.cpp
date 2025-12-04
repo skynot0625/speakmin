@@ -147,7 +147,7 @@ Core::Core(const Config& config, const std::vector<int>& tau_values)
 
     Neu_acc.resize(config.N_class, 0);
 
-    size_t A = static_cast<size_t>(0.2 * config.N_res); // 20% 비율
+    size_t A = static_cast<size_t>(0.3 * config.N_res); // 20% 비율
     Neu_adapt.reserve(A);
     for (size_t i = 0; i < A; ++i) {
         Neu_adapt.emplace_back(tau_adapt_default, b_step_default);
@@ -236,7 +236,6 @@ Core& Core::operator=(const Core& other) {
 }
 
 
-// Reset the core
 void Core::reset() {
     /*
     for (auto& neuron : Neu_res) {
@@ -268,6 +267,7 @@ void Core::reset() {
 
     for (auto &au : Neu_adapt) au.reset();
 
+    // Queue 명시적 정리
     while (!external_S_queue.empty()) {
         external_S_queue.pop();
     }
@@ -292,9 +292,30 @@ void Core::reset() {
         S_vec_trace_delay.pop();
     }
 
+    // Vector 명시적 정리 및 메모리 반환
     S_vec_now.clear();
-    Neu_acc.assign(Neu_acc.size(), 0);  // Reset the size of Neu_acc based on the current number of classes
+    S_vec_now.shrink_to_fit();
+    
+    S_vec_trace_now.clear();
+    S_vec_trace_now.shrink_to_fit();
+    
+    S_vec_trace_delay_now.clear();
+    S_vec_trace_delay_now.shrink_to_fit();
+    
+    Event_vec_now.clear();
+    Event_vec_now.shrink_to_fit();
+
+    // recorded data도 정리
+    recorded_times.clear();
+    recorded_times.shrink_to_fit();
+    
+    recorded_neuron_indices.clear();
+    recorded_neuron_indices.shrink_to_fit();
+
+    // Neu_acc 초기화
+    Neu_acc.assign(Neu_acc.size(), 0);
 }
+
 
 // Save recorded spikes to a file
 void Core::save_recorded_spikes(const std::string& filename) {
@@ -523,8 +544,9 @@ bool Core::run_loop() {
                                     if (layer == 'r') {
                                         std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
                                         std::pair<int, char> neu_id = std::make_pair(i, 'r');
-                                        // Event_unit event(T_now + t_delay, spk_id, neu_id, true);
-                                        Event_unit event(T_now + t_delay + i/10 * 300, spk_id, neu_id, true);
+                                        // embedded delay__
+                                        Event_unit event(T_now + t_delay, spk_id, neu_id, true);
+                                        // Event_unit event(T_now + t_delay + i/10 * 30000, spk_id, neu_id, true);
 
                                         #pragma omp critical
                                         {
@@ -551,8 +573,8 @@ bool Core::run_loop() {
                             {
 
                                 for (int n = 1; n < ET_N + 1; ++n) {
-                                    for (int m = 0; m < 100; ++m) {
-                                         S_vec_trace.push(Spike(T_now + t_delay + 1000*m + n + 10*m, {i, 'r'}));
+                                    for (int m = 0; m < 10; ++m) {
+                                         S_vec_trace.push(Spike(T_now + t_delay + 1000*m + n + ET_N*m, {i, 'r'}));
                                     }
                                     // S_vec_trace.push(Spike(T_now + t_delay + n, {i, 'r'}));
                                     /*
@@ -727,15 +749,15 @@ bool Core::run_loop() {
                             // else Neu_out[w].in(-0.1);
                         // }
                        
-                        for (size_t w = 0; w < Neu_out.size(); ++w) {
+                        // for (size_t w = 0; w < Neu_out.size(); ++w) {
                             // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.05);
                             // else Neu_out[w].in(-0.05);
                             // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.1);
                             // else Neu_out[w].in(-0.1);
                             // if (static_cast<size_t>(i / N_out_times) == (w / N_out_times)) Neu_out[w].in(0.1);
-                            if (static_cast<size_t>(i / N_out_times) != (w / N_out_times)) Neu_out[w].in(-0.1);
+                            // if (static_cast<size_t>(i / N_out_times) != (w / N_out_times)) Neu_out[w].in(-0.1);
                             // if (static_cast<size_t>(i / N_out_times) != (w / N_out_times)) Neu_out[w].in(-0.25);
-                        }
+                        // }
                         Neu_out[i].reset();
                         #pragma omp atomic
                         Neu_acc[static_cast<size_t>(i / N_out_times)] += 1;
