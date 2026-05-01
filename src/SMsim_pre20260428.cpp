@@ -13,7 +13,6 @@
 #include <nlohmann/json.hpp>
 #include <omp.h>
 #include <bitset>
-#include <algorithm>
 
 #include "Core.h"
 
@@ -265,7 +264,7 @@ double run_simulation(Core& core_template,
 
         // bias spike train 로드
         // std::string bias_file_path = "/home/sungminlee/speakmin/tools/speech-to-spikes/gen_bias_spike/bias_spikes_1Hz.bin"; // 40Hz가 잘나옴
-        std::string bias_file_path = "/home/sungminlee/speakmin/tools/speech-to-spikes/gen_bias_spike/dataset_output_chunks/bias_spikes_chunk0_5Hz.bin";
+        std::string bias_file_path = "/home/sungminlee/speakmin/tools/speech-to-spikes/gen_bias_spike/dataset_output_chunks/bias_spikes_chunk0_1Hz.bin";
         // std::cout<< "Loading bias spike train from: " << bias_file_path << std::endl;
         int bias_entries;
         std::vector<std::streampos> bias_offsets = calculate_offsets(bias_file_path, bias_entries);
@@ -309,11 +308,6 @@ double run_simulation(Core& core_template,
         chunk_labels.clear();
     }
     
-    // 마지막 incomplete mini-batch가 남아 있으면 테스트/저장 전에 반드시 반영합니다.
-    if (enabling_train) {
-        core_template.apply_accumulated_gradients();
-    }
-
     std::cout << std::endl;
     return static_cast<double>(correct_count) / data_count;
 }
@@ -374,17 +368,12 @@ int main(int argc, char *argv[]) {
     double lr = param_json["system_parameter"]["lr"].get<double>();
     int N_chunks = param_json["system_parameter"]["N_chunks"].get<int>();
     int N_test_chunks = param_json["system_parameter"]["N_test_chunks"].get<int>();
-    int batch_size = param_json["system_parameter"].value("batch_size", 64);
-    // int batch_size = param_json["system_parameter"].value("batch_size", 1);
-    bool average_batch_grad = param_json["system_parameter"].value("average_batch_grad", true);
 
     std::cout << "Loaded system parameters:" << std::endl;
     std::cout << "Epochs: " << num_epochs << std::endl;
     std::cout << "Training file path: " << base_train_file_path << std::endl;
     std::cout << "Test file path: " << base_test_file_path << std::endl;
     std::cout << "Simulation time (T_sim): " << T_sim << std::endl;
-    std::cout << "Batch size: " << batch_size << std::endl;
-    std::cout << "Average batch gradients: " << (average_batch_grad ? "true" : "false") << std::endl;
 
     std::cout << "version: " <<  __GIT_REV__ << std::endl;
     std::cout << "CXX: " <<  __VERSION__ << std::endl;
@@ -410,7 +399,6 @@ int main(int argc, char *argv[]) {
     Core core_template(param_file, weights_file, tau_values);
     core_template.T_sim = T_sim;
     core_template.lr = lr;
-    core_template.set_train_batch_size(static_cast<std::size_t>(std::max(1, batch_size)), average_batch_grad);
 
     for (int epoch = 0; epoch < num_epochs; ++epoch) {
         auto epoch_start = std::chrono::high_resolution_clock::now();

@@ -12,33 +12,8 @@
 #include <thread>
 #include <random>
 #include <algorithm>
-#include <unordered_map>
-#include <cstdint>
-#include <cstddef>
 
 using json = nlohmann::json;
-
-namespace {
-constexpr double W_MIN = -1.0;
-constexpr double W_MAX =  1.0;
-
-inline uint64_t make_weight_key(int row, int col) {
-    return (static_cast<uint64_t>(static_cast<uint32_t>(row)) << 32) |
-           static_cast<uint32_t>(col);
-}
-
-inline int key_row(uint64_t key) {
-    return static_cast<int>(key >> 32);
-}
-
-inline int key_col(uint64_t key) {
-    return static_cast<int>(key & 0xFFFFFFFFu);
-}
-
-inline double clamp_weight(double value) {
-    return std::max(W_MIN, std::min(W_MAX, value));
-}
-} // namespace
 
 // Core constructor with distributed tau values
 Core::Core(const std::string& param_file, const std::string& weights_file, const std::vector<int>& tau_values) {
@@ -139,10 +114,7 @@ Core::Core(const Config& config, const std::vector<int>& tau_values)
       PTE_times(config.PTE_times), 
       PTE_range(config.PTE_range),
       PTE_reg(0),
-      ET_N(config.ET_N),
-      train_batch_size(1),
-      average_batch_grad(true),
-      accumulated_batch_count(0) {
+      ET_N(config.ET_N) {
 
 #if defined(REFRACTORY)
     Neu_res.reserve(config.N_res);
@@ -227,12 +199,7 @@ Core::Core(const Core& other)
       PTE_times(other.PTE_times),
       PTE_range(other.PTE_range),
       PTE_reg(other.PTE_reg),
-      ET_N(other.ET_N),
-      train_batch_size(other.train_batch_size),
-      average_batch_grad(other.average_batch_grad),
-      accumulated_batch_count(other.accumulated_batch_count),
-      grad_W_out_accum(other.grad_W_out_accum),
-      grad_W_res_accum(other.grad_W_res_accum) {
+      ET_N(other.ET_N) {
 }
 
 // Assignment operator
@@ -264,11 +231,6 @@ Core& Core::operator=(const Core& other) {
         PTE_range = other.PTE_range;
         PTE_reg = other.PTE_reg;
         ET_N = other.ET_N;
-        train_batch_size = other.train_batch_size;
-        average_batch_grad = other.average_batch_grad;
-        accumulated_batch_count = other.accumulated_batch_count;
-        grad_W_out_accum = other.grad_W_out_accum;
-        grad_W_res_accum = other.grad_W_res_accum;
     }
     return *this;
 }
@@ -432,106 +394,7 @@ bool Core::run() {
     std::cout << "PTE_range: " << PTE_range << std::endl;
     std::cout << "ET_N: " << ET_N << std::endl;
     */
-    bool is_correct = run_loop();
-    finish_training_sample();
-    return is_correct;
-}
-
-void Core::set_train_batch_size(std::size_t batch_size, bool average_gradients) {
-    train_batch_size = std::max<std::size_t>(1, batch_size);
-    average_batch_grad = average_gradients;
-}
-
-void Core::finish_training_sample() {
-    if (!enabling_train) return;
-
-    ++accumulated_batch_count;
-    if (accumulated_batch_count >= train_batch_size) {
-        apply_accumulated_gradients(accumulated_batch_count);
-    }
-}
-
-void Core::accumulate_training_events(const std::vector<Event_unit>& events) {
-    if (events.empty()) return;
-
-    const int n_threads = std::max(1, omp_get_max_threads());
-    std::vector<std::unordered_map<uint64_t, double>> local_W_out(n_threads);
-    std::vector<std::unordered_map<uint64_t, double>> local_W_res(n_threads);
-
-    #pragma omp parallel
-    {
-        const int tid = omp_get_thread_num();
-        auto& out_map = local_W_out[tid];
-        auto& res_map = local_W_res[tid];
-
-        #pragma omp for schedule(static)
-        for (std::size_t idx = 0; idx < events.size(); ++idx) {
-            const Event_unit& E_now = events[idx];
-            const int spk_id_now = E_now.spk_id.first;
-            const char spk_l_now = E_now.spk_id.second;
-            const int neu_id_now = E_now.neu_id.first;
-            const char neu_l_now = E_now.neu_id.second;
-            const double delta = E_now.sign ? 1.0 : -1.0;
-
-            if (spk_l_now == 'r' && neu_l_now == 'o') {
-                out_map[make_weight_key(spk_id_now, neu_id_now)] += delta;
-            }
-#if defined(TRAIN_FA) || defined(TRAIN_DFA)
-            else if (spk_l_now == 'r' && neu_l_now == 'r') {
-                res_map[make_weight_key(spk_id_now, neu_id_now)] += delta;
-            }
-#endif
-        }
-    }
-
-    for (const auto& local_map : local_W_out) {
-        for (const auto& kv : local_map) {
-            grad_W_out_accum[kv.first] += kv.second;
-        }
-    }
-
-#if defined(TRAIN_FA) || defined(TRAIN_DFA)
-    for (const auto& local_map : local_W_res) {
-        for (const auto& kv : local_map) {
-            grad_W_res_accum[kv.first] += kv.second;
-        }
-    }
-#endif
-}
-
-void Core::apply_accumulated_gradients(std::size_t normalizer) {
-    if (grad_W_out_accum.empty() && grad_W_res_accum.empty()) {
-        accumulated_batch_count = 0;
-        return;
-    }
-
-    if (normalizer == 0) {
-        normalizer = std::max<std::size_t>(1, accumulated_batch_count);
-    }
-
-    const double scale = average_batch_grad ? (lr / static_cast<double>(normalizer)) : lr;
-
-    for (const auto& kv : grad_W_out_accum) {
-        const int pre = key_row(kv.first);
-        const int post = key_col(kv.first);
-        W_out[pre][post] = clamp_weight(W_out[pre][post] + scale * kv.second);
-    }
-
-#if defined(TRAIN_FA) || defined(TRAIN_DFA)
-    for (const auto& kv : grad_W_res_accum) {
-        const int pre = key_row(kv.first);
-        const int post = key_col(kv.first);
-        W_res[pre][post] = clamp_weight(W_res[pre][post] + scale * kv.second);
-    }
-#endif
-
-    clear_accumulated_gradients();
-}
-
-void Core::clear_accumulated_gradients() {
-    grad_W_out_accum.clear();
-    grad_W_res_accum.clear();
-    accumulated_batch_count = 0;
+    return run_loop();
 }
 
 // Run the simulation loop
@@ -939,21 +802,15 @@ bool Core::run_loop() {
 #else
             if (enabling_train) {
 #endif
-                const int train_index_int = static_cast<int>(train_index);
-
                 #pragma omp parallel for
                 for (int k = 0; k < N_out_times; ++k) {
-                    const std::size_t out_idx =
-                        class_now * static_cast<std::size_t>(N_out_times)
-                        + static_cast<std::size_t>(k);
-
-                #if defined(REFRACTORY)
-                    if (!Neu_out[out_idx].is_firing() &&
-                        !Neu_out[out_idx].is_ref(T_now) &&
-                        k == train_index_int &&
-                        !Neu_out[out_idx].is_SG_ref(T_now)) {
-                #endif
-                        bool SG_now = Neu_out[out_idx].get_SG();
+        #if defined(REFRACTORY)
+                    if (!Neu_out[class_now * N_out_times + k].is_firing() && !Neu_out[class_now * N_out_times + k].is_ref(T_now) && k == train_index && !Neu_out[class_now * N_out_times + k].is_SG_ref(T_now)) {
+                    // if (!Neu_out[class_now * N_out_times + k].is_firing() && !Neu_out[class_now * N_out_times + k].is_ref(T_now) && k == train_index) {
+                    // if (!Neu_out[class_now * N_out_times + k].is_firing() && !Neu_out[class_now * N_out_times + k].is_ref(T_now) && !Neu_out[class_now * N_out_times + k].is_SG_ref(T_now)) {
+                    // if (!Neu_out[class_now * N_out_times + k].is_firing() && !Neu_out[class_now * N_out_times + k].is_ref(T_now)) {
+        #endif
+                        bool SG_now = Neu_out[class_now * N_out_times + k].get_SG();
                         if (SG_now) {
                             for (const auto& S_now : S_vec_now) {
                                 int id_now = S_now.id.first;
@@ -961,7 +818,7 @@ bool Core::run_loop() {
 
                                 if (layer == 'r') {
                                     std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
-                                    std::pair<int, char> neu_id = std::make_pair(static_cast<int>(out_idx), 'o');
+                                    std::pair<int, char> neu_id = std::make_pair(class_now * N_out_times + k, 'o');
                                     Event_unit event(T_now, spk_id, neu_id, true);
                                     #pragma omp critical
                                     {
@@ -976,7 +833,7 @@ bool Core::run_loop() {
 
                                 if (layer == 'r') {
                                     std::pair<int, char> spk_id = std::make_pair(id_now, 'r');
-                                    std::pair<int, char> neu_id = std::make_pair(static_cast<int>(out_idx), 'o');
+                                    std::pair<int, char> neu_id = std::make_pair(class_now * N_out_times + k, 'o');
                                     Event_unit event(T_now, spk_id, neu_id, true);
                                     #pragma omp critical
                                     {
@@ -990,7 +847,7 @@ bool Core::run_loop() {
                             for (const auto& E_now : Event_vec_now) {
                             int spk_id_now = E_now.spk_id.first;
                             int neu_id_now = E_now.neu_id.first;
-                            Event_unit event(T_now, E_now.spk_id, E_now.neu_id, true == W_fb[neu_id_now][out_idx]);
+                            Event_unit event(T_now, E_now.spk_id, E_now.neu_id, true == W_fb[neu_id_now][class_now*N_out_times + k]);
                             #pragma omp critical
                             {
                                 Event_queue.push(event);
@@ -1035,9 +892,8 @@ bool Core::run_loop() {
         }
 
         if (enabling_train && !train_signal) {
-            // 기존에는 여기서 W_out/W_res를 즉시 업데이트했습니다.
-            // 이제는 이벤트를 gradient accumulator에만 저장하고,
-            // 실제 weight update는 데이터 또는 batch가 끝난 뒤에 수행합니다.
+
+            // std::cout << "Here is training part"<< std::endl;
             std::vector<Event_unit> events;
             #pragma omp critical
             {
@@ -1047,7 +903,77 @@ bool Core::run_loop() {
                 }
             }
 
-            accumulate_training_events(events);
+            // std::cout << "events.size(): "<< events.size() << std::endl;
+
+            #pragma omp parallel for
+            for (std::size_t i = 0; i < events.size(); ++i) {
+                Event_unit& E_now = events[i];
+                int spk_id_now = E_now.spk_id.first;
+                char spk_l_now = E_now.spk_id.second;
+                int neu_id_now = E_now.neu_id.first;
+                char neu_l_now = E_now.neu_id.second;
+                bool sign = E_now.sign;
+                // std::cout << "Before update: W_out[" << spk_id_now << "][" << neu_id_now << "] = " << W_out[spk_id_now][neu_id_now] << std::endl;
+                if (spk_l_now == 'r' && neu_l_now == 'o') {
+                    if (sign) {
+                        #pragma omp atomic
+                        W_out[spk_id_now][neu_id_now] += lr;  // alpha 사용
+                        
+                        if (W_out[spk_id_now][neu_id_now] > 1.0) 
+                            W_out[spk_id_now][neu_id_now] = 1.0;
+                    } else {
+                        #pragma omp atomic
+                        W_out[spk_id_now][neu_id_now] -= lr;
+                        
+                        if (W_out[spk_id_now][neu_id_now] < -1.0) 
+                            W_out[spk_id_now][neu_id_now] = -1.0;
+                    }
+                }
+                // std::cout << "After update: W_out[" << spk_id_now << "][" << neu_id_now << "] = " << W_out[spk_id_now][neu_id_now] << std::endl;
+#if defined(TRAIN_FA) || defined(TRAIN_DFA)
+
+                else if (spk_l_now == 'r' && neu_l_now == 'r'){
+                    if (sign) {
+                        #pragma omp atomic
+                        W_res[spk_id_now][neu_id_now] += lr;
+                        
+                        if (W_res[spk_id_now][neu_id_now] > 1) 
+                        W_res[spk_id_now][neu_id_now] = 1.0;
+                    } else {
+                        #pragma omp atomic
+                        W_res[spk_id_now][neu_id_now] -= lr;
+                        
+                        if (W_res[spk_id_now][neu_id_now] < -1) 
+                        W_res[spk_id_now][neu_id_now] = -1.0;
+                    }
+                    // std::cout << "After update: W_res[" << spk_id_now << "][" << neu_id_now << "] = " << W_res[spk_id_now][neu_id_now] << std::endl;
+                }
+                /*
+                else if (spk_l_now == 'i' && neu_l_now == 'r'){
+                    if (sign) {
+                        #pragma omp atomic
+                        W_in[spk_id_now][neu_id_now] += lr*0.1;
+                        if (W_in[spk_id_now][neu_id_now] > 0.1) W_in[spk_id_now][neu_id_now] = 0.1;
+                    } else {
+                        #pragma omp atomic
+                        W_in[spk_id_now][neu_id_now] -= lr*0.1;
+                        if (W_in[spk_id_now][neu_id_now] < -0.1) W_in[spk_id_now][neu_id_now] = -0.1;
+                    }
+                }
+
+                else if (spk_l_now == 'r' && neu_l_now == 'r'){
+                    if (sign) {
+                        #pragma omp atomic
+                        W_res[spk_id_now][neu_id_now] += lr*0.1;
+                        if (W_res[spk_id_now][neu_id_now] > 1.0*0.1) W_res[spk_id_now][neu_id_now] = 1.0*0.1;
+                    } else {
+                        #pragma omp atomic
+                        W_res[spk_id_now][neu_id_now] -= lr*0.1;
+                        if (W_res[spk_id_now][neu_id_now] < -1.0*0.1) W_res[spk_id_now][neu_id_now] = -1.0*0.1;
+                    }
+                }*/
+#endif
+            }
             events.clear();
         }
 
@@ -1188,6 +1114,5 @@ void Core::load_weights(const std::string& filename) {
     W_res = weights_json["W_res"].get<std::vector<std::vector<double>>>();
     W_out = weights_json["W_out"].get<std::vector<std::vector<double>>>();
 
-    clear_accumulated_gradients();
     file.close();
 }

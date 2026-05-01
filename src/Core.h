@@ -1,5 +1,11 @@
 // Copyright contributors to the speakmin project
 // SPDX-License-Identifier: Apache-2.0
+
+// 1) Core.h 상단 include에 추가
+#include <cstddef>
+#include <cstdint>
+#include <unordered_map>
+
 #ifndef CORE_H
 #define CORE_H
 
@@ -47,6 +53,11 @@ public:
     size_t PTE_reg;
     double lr;
 
+    // batch training 관련 함수들
+
+    void set_train_batch_size(std::size_t batch_size, bool average_gradients = true);
+    void apply_accumulated_gradients(std::size_t normalizer = 0);
+
 private:
     std::vector<std::vector<double>> W_in, W_res, W_out, W_bias, W_bias_out;
     std::vector<std::vector<bool>> W_fb;
@@ -78,6 +89,19 @@ private:
 
     bool run_loop();
     void record_spike(uint32_t time, int neuron_index);
+
+    //batch training 관련 함수들
+
+    void finish_training_sample();
+    void accumulate_training_events(const std::vector<Event_unit>& events);
+    void clear_accumulated_gradients();
+
+    std::size_t train_batch_size = 1;
+    bool average_batch_grad = true;
+    std::size_t accumulated_batch_count = 0;
+
+    std::unordered_map<uint64_t, double> grad_W_out_accum;
+    std::unordered_map<uint64_t, double> grad_W_res_accum;
 };
 
 #endif // CORE_H

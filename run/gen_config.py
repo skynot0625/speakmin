@@ -34,6 +34,14 @@ num_class = 20
 # num_class = 6
 # num_class = 10
 
+num_neu_in = 64
+# num_neu_in = 64
+# num_neu_in = 128
+num_neu_res = 512 - 100
+num_class = 20
+
+num_class = 4
+
 num_out_times = 5
 # num_out_times = 1
 # 2, 4, 10
@@ -65,7 +73,7 @@ W_res = rng.uniform(-1, 1, (num_neu_res, num_neu_res))
 sparsity = 0.7
 # sparsity = -1
 mask = rng.random(size=(num_neu_res, num_neu_res)) > sparsity
-# W_res = W_res * mask  # 원소별 곱셈으로 마스크 적용
+W_res = W_res * mask  # 원소별 곱셈으로 마스크 적용
 np.fill_diagonal(W_res, 0)
 rho_W_res = max(abs(np.linalg.eigvals(W_res)))
 print(rho_W_res) 
@@ -76,7 +84,7 @@ print(in_scale)
 W_in = rng.uniform(-1, 1, (num_neu_in, num_neu_res))
 
 mask = rng.random(size=(num_neu_in, num_neu_res)) > sparsity
-# W_in = W_in * mask  # 원소별 곱셈으로 마스크 적용
+W_in = W_in * mask  # 원소별 곱셈으로 마스크 적용
 
 def xavier_init_uniform(input_size, output_size):
     limit = np.sqrt(6 / (input_size + output_size))
@@ -88,6 +96,10 @@ def xavier_init_normal(input_size, output_size):
 
 W_out = rng.uniform(-1, 1, (num_neu_res, num_neu_out))
 
+# W_in = W_in * in_scale
+W_res = W_res * in_scale
+# W_out = W_out * in_scale
+
 # num_neg_rows = num_neu_res // 5
 # num_pos_rows = num_neu_res - num_neg_rows
 # 음수 행 (-1 ~ 0)
@@ -96,10 +108,14 @@ W_out = rng.uniform(-1, 1, (num_neu_res, num_neu_out))
 # W_out[num_neg_rows:] = rng.uniform(0, 1, (num_pos_rows, num_neu_out))
 
 W_bias = rng.uniform(-1, 1, (num_neu_bias, num_neu_res))
-# W_bias = rng.uniform(-1, 0, (num_neu_bias, num_neu_res))
+# W_bias = rng.uniform(0, 1, (num_neu_bias, num_neu_res))
+
+mask = rng.random(size=(num_neu_bias, num_neu_res)) > sparsity
+W_bias = W_bias * mask  # 원소별 곱셈으로 마스크 적용
 
 # W_bias_out = rng.uniform(-1, 1, (num_neu_bias, num_neu_out))
 W_bias_out = rng.uniform(-1, 1, (num_neu_bias, num_neu_out))
+# W_bias_out = rng.uniform(-1, 0, (num_neu_bias, num_neu_out))
 
 W_fb = rng.uniform(-1, 1, (num_neu_res, num_neu_out)) > 0
 
@@ -148,17 +164,18 @@ tau_array_hetero = tau_values[tau_bins]
 
 # 로그정규분포 파라미터 설정
 median = 4.0  # 목표 중간값 (ms)
-mean = 4.0
-sigma = 0.5        # 분산(폭) 조절
+# mean = 20.0
+sigma = 0.75        # 분산(폭) 조절
 
 # mu = np.log(median)  # median = exp(mu)
-mu = np.log(mean) - 0.5 * sigma**2
+mu = np.log(median) - 0.5 * sigma**2
 
 # 타겟 tau 값들 설정
-tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 56]) * 500 # 20%까지나옴..
-# tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 56]) * 1000 # 20%까지나옴..
+# tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 56]) * 500 # 20%까지나옴..
+tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 56]) * 1000 # 20%까지나옴..
 # tau_values = np.array([1, 2, 3, 4, 5, 6, 7]) * 1000
 # tau_values = np.array([1, 2, 3, 4, 5, 6, 7]) * 2000
+# tau_values = np.array([1, 2, 3, 4, 5, 6, 7]) * 10000
 # tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ,14 ,15, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120]) * 500
 # tau_values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ,14 ,15]) * 500
 # tau_values = np.array([1, 2, 3, 4, 5, 6, 7]) * 1000
@@ -233,7 +250,7 @@ else:
 
 # Define the core parameters dictionary
 core_parameters = {
-    "t_delay": 1,
+    "t_delay": 1001,
     "V_init": 0.0,
     "tau_out": 100000.0,
     "tau_out_1": 4 * 4000.0,
@@ -278,16 +295,6 @@ core_parameters = {
     # "tau_out_3": 4 * 1000.0,
     # "tau_out_4": 8* 1000.0,
     # "tau_out_5": 16* 1000.0,
-    "tau_out_1": 1 * 500.0,
-    "tau_out_2": 2 * 500.0,
-    "tau_out_3": 4 * 500.0,
-    "tau_out_4": 8* 500.0,
-    "tau_out_5": 16* 500.0,
-    "tau_out_1": 2 * 500.0,
-    "tau_out_2": 2 * 500.0,
-    "tau_out_3": 4 * 500.0,
-    "tau_out_4": 8 * 500.0,
-    "tau_out_5": 8 * 500.0,
     # "tau_out_1": 1 * 500.0,
     # "tau_out_2": 1 * 500.0,
     # "tau_out_3": 1 * 500.0,
@@ -298,6 +305,11 @@ core_parameters = {
     # "tau_out_3": 4 * 1000.0,
     # "tau_out_4": 8* 1000.0,
     # "tau_out_5": 16* 1000.0,
+    "tau_out_1": 32 * 1000.0,
+    "tau_out_2": 32 * 1000.0,
+    "tau_out_3": 32 * 1000.0,
+    "tau_out_4": 32 * 1000.0,
+    "tau_out_5": 32 * 1000.0,
     "V_bot": -2.0,
     "V_th": 1.0,
     # "V_th": 0.5,
@@ -307,30 +319,39 @@ core_parameters = {
     "alpha_out": 0.1,
     # "alpha_out": 1.0,
     "SG_window": 0.5,
-    "SG_window": 0.25,
+    # "SG_window": 0.25,
     "N_in": num_neu_in,
     "N_res": num_neu_res,
     "N_out": num_neu_out,
     "N_bias": num_neu_bias,
     "N_class": num_class,
     "N_out_times": num_out_times,
+    # "PTE_slide": 1000,
+    # "PTE_times": 10,
+    # "PTE_range": 4,
     "PTE_slide": 1,
     "PTE_times": 1,
     "PTE_range": 1,
-    "ET_N": 100,
+    "ET_N": 10,
 }
 
 # Define the system parameters dictionary
 system_parameters = {
     "T_sim": 1000000000,
     "epoch": 1000,                                               # Example epoch value
-    "lr": 0.004,
+    "lr": 0.01,
+    # "lr": 0.0005,
+    # "lr": 0.004,
     # "lr": 0.0001,                                                # same as conductance steps. This is for 8bits ~ 1/250.
     # "lr": 0.00001,
-    # "lr": 0.001,
-    # "test_file": "../tools/speech-to-spikes/gen_spike/test.bin",    # Replace with the actual test file path
-    "test_file": "../tools/speech-to-spikes/gen_spike/test",
-    "test_file": "/home/sungminlee/speakmin/run/test/test",
+    "lr": 0.1,
+    "test_file": "../tools/speech-to-spikes/gen_spike/test0.bin",    # Replace with the actual test file path
+    # "test_file": "../tools/speech-to-spikes/gen_spike/1204_all_32_1_20ms_prenormprenorm/test",
+    # "test_file": "../tools/speech-to-spikes/gen_spike/1029_all_64_5_4ms_pre_norm/test",
+    # "test_file": "../tools/speech-to-spikes/gen_spike/0623_all_64_2_10ms_stft_simplereduction_30_pre_norm_pre/test",
+    
+    # "test_file": "../tools/speech-to-spikes/gen_spike/1025_all_32_5_4ms_pre_norm/test",
+    # "test_file": "/home/sungminlee/speakmin/run/test/test",
     # "test_file": "/home/sungminlee/speakmin/run/ssc_test/test",
     #"test_file": "/home/sungminlee/speakmin/run/SSC_700/test",
     #"test_file": "/home/sungminlee/speakmin/run/SSC_350/test",
@@ -339,7 +360,7 @@ system_parameters = {
     # "test_file": "../tools/speech-to-spikes/gen_spike/0615_all_64_2_10ms_stft_simplereduction/test",
     # "test_file": "../tools/speech-to-spikes/gen_spike/0618_all_64_1_10ms_stft_simplereduction/test",
     # "test_file": "../tools/speech-to-spikes/gen_spike/0713_all_128_1_10ms_stft_simplereduction_pre_norm_pre/test",
-    # "test_file": "../tools/speech-to-spikes/gen_spike/test",
+    "test_file": "../tools/speech-to-spikes/gen_spike/test",
     # "test_file": "../tools/speech-to-spikes/gen_spike/test",
     # "test_file": "../tools/speech-to-spikes/gen_spike/0202_all_32_2_16ms_pre_norm_mixed/test",
     # "test_file": "../tools/speech-to-spikes/gen_spike/test",
@@ -353,8 +374,11 @@ system_parameters = {
     # "test_file": "../tools/speech-to-spikes/gen_spike/all_32_2/test.bin",    # Replace with the actual test file path
     # "test_file": "../tools/speech-to-spikes/gen_spike/all_32_5/test.bin",    # Replace with the actual test file path
     # "test_file": "../tools/speech-to-spikes/gen_spike/all_32_NONE_10ms/test.bin",
-    "training_file": "../tools/speech-to-spikes/gen_spike/train",   # Replace with the actual training file path
-    "training_file": "/home/sungminlee/speakmin/run/train/train",
+    "training_file": "../tools/speech-to-spikes/gen_spike/train",
+    # "training_file": "../tools/speech-to-spikes/gen_spike/1204_all_32_1_20ms_prenormprenorm/train",   # Replace with the actual training file path
+    # "training_file": "../tools/speech-to-spikes/gen_spike/1029_all_64_5_4ms_pre_norm/train",
+    # "training_file": "../tools/speech-to-spikes/gen_spike/0623_all_64_2_10ms_stft_simplereduction_30_pre_norm_pre/train",
+    # "training_file": "/home/sungminlee/speakmin/run/train/train",
     #"training_file": "/home/sungminlee/speakmin/run/ssc_train/train",
     #"training_file": "/home/sungminlee/speakmin/run/SSC_700/train",
     #"training_file": "/home/sungminlee/speakmin/run/SSC_350/train",

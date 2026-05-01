@@ -488,7 +488,7 @@ class GSCD(object):
                 if norm:
                     sound.normalize(target_dBFS = norm_target_dBFS)
                     sound.preemphasis(coef = preemphasis_coef)
-                    # sound.normalize(target_dBFS = norm_target_dBFS)
+                    sound.normalize(target_dBFS = norm_target_dBFS)
                 # if preemphasis:
                 #     sound.preemphasis(coef = preemphasis_coef)
                 # if norm:
